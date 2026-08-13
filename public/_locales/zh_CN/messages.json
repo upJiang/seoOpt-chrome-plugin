@@ -1,0 +1,14 @@
+{
+  "extName": { "message": "SEO优化" },
+  "extDescription": { "message": "本地检查页面、站点与海外追踪链路，并结合 SEO/SEM 数据提供可解释的优化建议。" },
+  "actionTitle": { "message": "扫描当前页面" },
+  "tabOverview": { "message": "概览" },
+  "tabIssues": { "message": "问题" },
+  "tabRecommendations": { "message": "优化建议" },
+  "tabOverseas": { "message": "海外站优化" },
+  "tabAi": { "message": "AI 深度解读" },
+  "tabSem": { "message": "SEM" },
+  "scanPage": { "message": "扫描当前页面" },
+  "rescan": { "message": "重新扫描" },
+  "settings": { "message": "设置" }
+}

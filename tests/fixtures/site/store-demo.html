@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Atlas Metrics 为小型团队提供清晰的经营数据、自动报告和异常提醒。">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="http://127.0.0.1:4173/store-demo.html">
+  <title>Atlas Metrics - 创业团队经营分析</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f4f7fb; color: #14213d; font: 15px/1.6 system-ui, sans-serif; }
+    header { display: flex; height: 68px; align-items: center; justify-content: space-between; padding: 0 42px; background: #102443; color: #fff; }
+    header span { font-size: 19px; font-weight: 650; }
+    nav { display: flex; gap: 24px; }
+    nav a { color: #cbd7e8; text-decoration: none; }
+    main { padding: 38px 42px 60px; }
+    .eyebrow { margin: 0 0 5px; color: #2563eb; font-size: 12px; font-weight: 650; text-transform: uppercase; }
+    h1 { max-width: 650px; margin: 0; font-size: 38px; line-height: 1.18; }
+    .intro { max-width: 650px; margin: 14px 0 26px; color: #52627a; font-size: 17px; }
+    .actions { display: flex; gap: 10px; margin-bottom: 34px; }
+    .actions a { min-height: 42px; padding: 9px 16px; border: 1px solid #c7d2e2; border-radius: 5px; color: #14213d; text-decoration: none; }
+    .actions a:first-child { border-color: #2563eb; background: #2563eb; color: #fff; }
+    .metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid #d8e0eb; border-radius: 6px; background: #fff; }
+    .metric { min-height: 116px; padding: 18px; border-right: 1px solid #d8e0eb; }
+    .metric:last-child { border-right: 0; }
+    .metric span { display: block; color: #6b7890; font-size: 12px; }
+    .metric b { display: block; margin-top: 8px; font-size: 27px; font-weight: 600; }
+    section { margin-top: 28px; }
+    h3 { margin: 0 0 12px; font-size: 18px; }
+    table { width: 100%; border-collapse: collapse; border: 1px solid #d8e0eb; background: #fff; }
+    th, td { padding: 12px 14px; border-bottom: 1px solid #e5eaf1; text-align: left; }
+    th { color: #6b7890; font-size: 12px; font-weight: 600; }
+    .status { color: #188457; }
+  </style>
+</head>
+<body>
+  <header>
+    <span>Atlas Metrics</span>
+    <nav><a href="/store-demo.html">产品</a><a href="/healthy.html">客户案例</a><a href="">资源</a></nav>
+  </header>
+  <main>
+    <p class="eyebrow">经营分析工作台</p>
+    <h1>让每一次增长决策都有证据</h1>
+    <p class="intro">统一收入、获客和留存数据，为创业团队生成清晰的周报与异常提醒。</p>
+    <div class="actions"><a href="#start">免费开始</a><a href="#missing-demo">查看演示</a></div>
+    <div class="metrics">
+      <div class="metric"><span>本月收入</span><b>¥286,400</b></div>
+      <div class="metric"><span>有效线索</span><b>1,284</b></div>
+      <div class="metric"><span>转化率</span><b>8.7%</b></div>
+    </div>
+    <section id="start">
+      <h3>渠道表现</h3>
+      <table>
+        <thead><tr><th>渠道</th><th>线索</th><th>收入</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td>自然搜索</td><td>486</td><td>¥112,800</td><td class="status">稳定</td></tr>
+          <tr><td>搜索广告</td><td>352</td><td>¥96,200</td><td class="status">增长</td></tr>
+          <tr><td>品牌直接访问</td><td>241</td><td>¥52,900</td><td class="status">稳定</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

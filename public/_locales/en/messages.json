@@ -1,0 +1,14 @@
+{
+  "extName": { "message": "SEO Optimizer" },
+  "extDescription": { "message": "Audit page, site and overseas tracking signals locally, then diagnose SEO/SEM data with explainable actions." },
+  "actionTitle": { "message": "Scan current page" },
+  "tabOverview": { "message": "Overview" },
+  "tabIssues": { "message": "Issues" },
+  "tabRecommendations": { "message": "Recommendations" },
+  "tabOverseas": { "message": "Overseas" },
+  "tabAi": { "message": "AI analysis" },
+  "tabSem": { "message": "SEM" },
+  "scanPage": { "message": "Scan current page" },
+  "rescan": { "message": "Rescan" },
+  "settings": { "message": "Settings" }
+}

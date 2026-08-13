@@ -1,0 +1,10 @@
+node_modules/
+.output/
+.wxt/
+.chrome-dev-profile/
+coverage/
+playwright-report/
+test-results/
+*.log
+.DS_Store
+gpt密钥.md

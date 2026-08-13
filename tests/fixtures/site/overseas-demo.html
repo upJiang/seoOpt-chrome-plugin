@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en-US">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Atlas Global helps international SaaS teams connect search traffic, analytics events, and qualified revenue.">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="http://127.0.0.1:4173/overseas-demo.html">
+  <link rel="alternate" hreflang="en-US" href="http://127.0.0.1:4173/overseas-demo.html">
+  <link rel="alternate" hreflang="x-default" href="http://127.0.0.1:4173/overseas-demo.html">
+  <title>Atlas Global - International Search Revenue Analytics</title>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    window.uetq = window.uetq || [];
+    window.__seoOptOriginalDataLayerPush = window.dataLayer.push;
+    window.__seoOptOriginalUetPush = window.uetq.push;
+    window.gtag = function () { window.dataLayer.push(arguments); };
+    window.gtag('consent', 'default', {
+      analytics_storage: 'denied',
+      ad_storage: 'denied',
+      ad_user_data: 'denied',
+      ad_personalization: 'denied'
+    });
+    window.gtag('config', 'G-SEOOPT01');
+    window.gtag('config', 'AW-123456789');
+    window.dataLayer.push({ event: 'page_view', container_id: 'GTM-SEOOPT' });
+    window.uetq.push({ ti: '1234567', event: 'page_view' });
+    window.clarity = window.clarity || function () { (window.clarity.q = window.clarity.q || []).push(arguments); };
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eef4ff; color: #17213d; font: 15px/1.6 system-ui, sans-serif; }
+    header { display: flex; min-height: 68px; align-items: center; justify-content: space-between; padding: 0 42px; border-bottom: 2px solid #17213d; background: #3157d8; color: #fff; }
+    header span { font-size: 20px; font-weight: 750; }
+    nav { display: flex; gap: 22px; }
+    nav a { color: #fff; text-decoration: none; }
+    main { padding: 42px; }
+    .eyebrow { margin: 0 0 8px; color: #3157d8; font-size: 12px; font-weight: 750; text-transform: uppercase; }
+    h1 { max-width: 720px; margin: 0; font-size: 40px; line-height: 1.15; }
+    .intro { max-width: 690px; margin: 16px 0 26px; color: #52627a; font-size: 17px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+    button { min-height: 44px; padding: 0 17px; border: 2px solid #17213d; border-radius: 7px; background: #fff; color: #17213d; font-weight: 750; box-shadow: 2px 2px 0 #17213d; cursor: pointer; }
+    button:first-child { background: #ffd84d; }
+    .signals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 34px; }
+    .signal { min-height: 118px; padding: 18px; border: 2px solid #17213d; border-radius: 7px; background: #fff; box-shadow: 3px 3px 0 #17213d; }
+    .signal span { color: #65718a; font-size: 12px; }
+    .signal p { margin: 8px 0 0; font-size: 24px; font-weight: 750; }
+    #result { min-height: 24px; margin-top: 18px; color: #108a5b; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <header><span>Atlas Global</span><nav><a href="/overseas-demo.html">Platform</a><a href="/healthy.html">Resources</a><a href="#contact">Contact</a></nav></header>
+  <main>
+    <p class="eyebrow">International search operations</p>
+    <h1>Connect every search click to qualified revenue</h1>
+    <p class="intro">Audit international landing pages, verify analytics events, and reconcile Google or Microsoft advertising with real pipeline results.</p>
+    <div class="actions">
+      <button id="success" type="button">Book a successful demo</button>
+      <button id="failure" type="button">Submit an invalid form</button>
+      <button id="spa-route" type="button">Open pricing route</button>
+    </div>
+    <p id="result" role="status"></p>
+    <section class="signals" aria-label="Search growth signals">
+      <div class="signal"><span>Target market</span><p>United States</p></div>
+      <div class="signal"><span>Primary language</span><p>English</p></div>
+      <div class="signal"><span>Qualified pipeline</span><p>USD 86,400</p></div>
+    </section>
+  </main>
+  <script>
+    document.querySelector('#success').addEventListener('click', () => {
+      window.dataLayer.push({ event: 'generate_lead', event_id: 'private-lead-id', lead: { currency: 'USD', value: 120 } });
+      window.uetq.push('event', 'generate_lead', { event_id: 'private-lead-id' });
+      document.querySelector('#result').textContent = 'Demo request accepted.';
+    });
+    document.querySelector('#failure').addEventListener('click', () => {
+      window.dataLayer.push({ event: 'form_error', form: { field_name: 'work_email' } });
+      document.querySelector('#result').textContent = 'Please enter a valid business email.';
+    });
+    document.querySelector('#spa-route').addEventListener('click', () => {
+      history.pushState({}, '', '/overseas-demo.html/pricing?utm_source=internal');
+      document.querySelector('#result').textContent = 'Pricing route loaded without a document refresh.';
+    });
+  </script>
+</body>
+</html>

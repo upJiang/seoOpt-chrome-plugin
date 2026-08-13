@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CSR 与 Shadow DOM 测试</title></head>
+<body>
+  <div id="app"></div><seo-test></seo-test>
+  <script>
+    document.querySelector('#app').innerHTML = '<main><h1>客户端渲染的主要内容</h1><p>' + '仅在脚本执行后出现的正文 '.repeat(80) + '</p></main>';
+    const host = document.querySelector('seo-test');
+    const root = host.attachShadow({ mode: 'open' });
+    root.innerHTML = '<section><h2>Open Shadow Root 内容</h2><img id="shadow-image" src="/assets/shadow.png"></section>';
+  </script>
+</body>
+</html>
