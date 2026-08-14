@@ -23,6 +23,29 @@ export type SemChangeDimension = 'budget' | 'bid_strategy' | 'conversion_goal' |
 export type OverseasSearchEngine = 'google' | 'bing' | 'both';
 export type OverseasSignalStatus = 'normal' | 'attention' | 'confirm' | 'unavailable' | 'untested';
 export type TrackingPlatform = 'google_analytics' | 'google_tag_manager' | 'google_ads' | 'bing_uet' | 'microsoft_clarity';
+export type OverseasFindingKind = 'issue' | 'opportunity';
+
+export interface OverseasNormalItem {
+  id: string;
+  title: string;
+  evidence: string;
+}
+
+export interface OverseasEvidenceGap {
+  id: string;
+  title: string;
+  confirmed: string;
+  unavailable: string;
+  limitation: string;
+}
+
+export interface OtherAnalyticsSnapshot {
+  platform: 'baidu_tongji' | 'microsoft_clarity';
+  label: string;
+  detected: boolean;
+  scriptCount: number;
+  requestObserved: boolean;
+}
 
 export interface InternationalProjectSettings {
   targetCountry: string;
@@ -31,6 +54,72 @@ export interface InternationalProjectSettings {
   useGoogleAds: boolean;
   useMicrosoftAds: boolean;
   conversionDomains: string[];
+  googleVerification?: GoogleVerificationResult;
+}
+
+export interface SearchAccessConclusion {
+  id: string;
+  status: OverseasSignalStatus;
+  title: string;
+  explanation: string;
+  checked: string;
+  impact: string;
+  action: string;
+  expectedResult: string;
+  owner: '你可以自己完成' | '需要网站开发处理' | '需要运营确认' | '需要广告人员确认';
+  actionTarget: 'search_access' | 'google_verification' | 'international' | 'tracking_test';
+  developerMessage: string;
+  confidence: EvidenceConfidence;
+  technicalEvidence: string[];
+}
+
+export interface GoogleVerificationResult {
+  pageUrl: string;
+  result: 'accessible' | 'issue' | 'unclear';
+  confirmedAt: string;
+}
+
+export interface TrackingTestConclusion {
+  status: OverseasSignalStatus;
+  successfulAction: 'recorded_once' | 'not_observed' | 'duplicate_candidate' | 'untested';
+  failedAction: 'not_recorded' | 'recorded_candidate' | 'untested';
+  messages: string[];
+  technicalEvidence: string[];
+}
+
+export interface OverseasDiagnosis {
+  checkedItems: string[];
+  normalItems: OverseasNormalItem[];
+  issues: OverseasDiagnosticFinding[];
+  opportunities: OverseasDiagnosticFinding[];
+  evidenceGaps: OverseasEvidenceGap[];
+  normalCount: number;
+  issueCount: number;
+  opportunityCount: number;
+  otherAnalytics: OtherAnalyticsSnapshot[];
+}
+
+export interface OverseasSummary extends OverseasDiagnosis {
+  searchAccess: SearchAccessConclusion;
+  googleSearch: {
+    canOpen: OverseasSignalStatus;
+    canRead: OverseasSignalStatus;
+    indexAllowed: OverseasSignalStatus;
+    indexed: OverseasSignalStatus;
+    indexedExplanation: string;
+  };
+  googleAnalytics: {
+    tag: OverseasSignalStatus;
+    initialized: OverseasSignalStatus;
+    request: OverseasSignalStatus;
+    platform: OverseasSignalStatus;
+  };
+  googleAds: {
+    applicable: boolean;
+    status: OverseasSignalStatus;
+    explanation: string;
+  };
+  tracking: TrackingTestConclusion;
 }
 
 export interface TrackingChainStage {
@@ -74,6 +163,7 @@ export interface InternationalSeoSnapshot {
   xDefault: boolean;
   issues: string[];
   targets?: Array<{
+    kind?: 'language' | 'mobile';
     lang: string;
     url: string;
     status: number | null;
@@ -85,12 +175,20 @@ export interface InternationalSeoSnapshot {
     issue: string | null;
   }>;
   sitemapConsistency?: 'matched' | 'partial' | 'unavailable';
+  relatedCheck?: InternationalRelatedCheck;
   regionalSignals?: {
     currencyCodes: string[];
     phoneCountryCodes: string[];
     datePatterns: string[];
   };
   checkedAt: string;
+}
+
+export interface InternationalRelatedCheck {
+  checkedAt: string;
+  checkedUrls: string[];
+  skippedOrigins: string[];
+  status: 'complete' | 'partial' | 'not_applicable';
 }
 
 export interface OverseasStaticSnapshot {
@@ -100,6 +198,7 @@ export interface OverseasStaticSnapshot {
   internationalSeo: InternationalSeoSnapshot;
   clickParameters: { name: string; present: boolean; preservedAfterRedirect: boolean | null }[];
   limitations: string[];
+  otherAnalytics?: OtherAnalyticsSnapshot[];
 }
 
 export interface TrackingObservation {
@@ -191,6 +290,8 @@ export interface TrackingReconciliationReport {
 
 export interface OverseasDiagnosticFinding {
   id: string;
+  kind: OverseasFindingKind;
+  category: 'search_access' | 'international' | 'tracking';
   title: string;
   priority: AuditPriority;
   status: OverseasSignalStatus;
@@ -203,6 +304,10 @@ export interface OverseasDiagnosticFinding {
   platformConfirmation: string;
   rollback: string;
   limitation: string;
+  applicability: string;
+  directResult: string;
+  possibleEffect: string;
+  notGuaranteed: string;
 }
 
 export interface SearchProject {
@@ -638,5 +743,25 @@ export interface SeoPerformanceSummary {
     previous: { impressions: number; clicks: number; ctr: number };
     change: { impressions: number | null; clicks: number | null; ctr: number | null };
     confidence: EvidenceConfidence;
+    period: {
+      days: number;
+      previousStart: string;
+      previousEnd: string;
+      currentStart: string;
+      currentEnd: string;
+      maturityDays: number;
+    };
+    segments: {
+      branded: {
+        current: { impressions: number; clicks: number; ctr: number };
+        previous: { impressions: number; clicks: number; ctr: number };
+        change: { impressions: number | null; clicks: number | null; ctr: number | null };
+      };
+      nonBranded: {
+        current: { impressions: number; clicks: number; ctr: number };
+        previous: { impressions: number; clicks: number; ctr: number };
+        change: { impressions: number | null; clicks: number | null; ctr: number | null };
+      };
+    };
   };
 }

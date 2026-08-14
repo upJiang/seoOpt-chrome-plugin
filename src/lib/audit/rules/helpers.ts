@@ -25,6 +25,7 @@ export interface FindingInput {
   codeExample?: string | undefined;
   locator?: ElementLocator | undefined;
   scoreRatio?: number | null | undefined;
+  includedInScore?: boolean;
   scoreCap?: number | undefined;
   scope?: AuditFinding['scope'];
   evidenceSource?: AuditFinding['evidenceSource'];
@@ -75,6 +76,7 @@ export function findingFromRule(rule: AuditRule, input: FindingInput): AuditFind
     priority: input.priority ?? 'P3',
     points: rule.points,
     scoreRatio: input.scoreRatio === undefined ? defaultScoreRatio(input.status) : input.scoreRatio,
+    includedInScore: input.includedInScore ?? rule.points > 0,
     evidence: input.evidence,
     impact: input.impact,
     explanation: input.explanation,

@@ -4,6 +4,7 @@ import {
   classifyPageAccessError,
   isExplicitlyUnsupportedUrl,
   originPermissionPattern,
+  pageStateMatchesUrl,
 } from '../src/lib/page-access';
 
 describe('page access classification', () => {
@@ -32,5 +33,12 @@ describe('page access classification', () => {
     expect(classifyPageAccessError('Cannot access a chrome:// URL')).toBe('unsupported');
     expect(classifyPageAccessError('PDF 页面不支持 DOM SEO 审计。')).toBe('unsupported');
     expect(classifyPageAccessError('robots.txt 请求超时')).toBe('scan_error');
+  });
+
+  it('discards restricted and ready states after the tab navigates elsewhere', () => {
+    expect(pageStateMatchesUrl({ status: 'unsupported', tabId: 1, reason: 'restricted' }, 'https://example.com/')).toBe(false);
+    expect(pageStateMatchesUrl({ status: 'unsupported', tabId: 1, reason: 'restricted' }, 'chrome://settings/')).toBe(true);
+    expect(pageStateMatchesUrl({ status: 'ready', tabId: 1, report: { url: 'https://old.example/' } as never }, 'https://new.example/')).toBe(false);
+    expect(pageStateMatchesUrl({ status: 'ready', tabId: 1, report: { url: 'https://new.example/' } as never }, 'https://new.example/')).toBe(true);
   });
 });

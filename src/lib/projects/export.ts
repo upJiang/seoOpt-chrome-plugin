@@ -1,4 +1,4 @@
-import { getProjectRows, getSitePages, latestLogSummary, latestOverseasReport, latestSemReport, latestSiteRun, listAuditBaselines, listChangeRecords, listDatasets, listRemediationTasks, listTrackingRuns } from './db';
+import { getProjectRows, getSitePages, latestLogSummary, latestOverseasReport, latestSemReport, latestSiteRun, listAuditBaselines, listChangeRecords, listDatasets, listTrackingRuns } from './db';
 import type { AnalyticsPerformanceRow, BusinessOutcomeRow, SearchProject, SemPerformanceRow, SeoPerformanceRow } from './types';
 import { summarizeSeoPerformance } from '../seo/performance';
 import { getSiteIssueDisplayTitle, getSiteIssueGuidance } from '../site-audit/guidance';
@@ -6,7 +6,7 @@ import { getSiteIssueDisplayTitle, getSiteIssueGuidance } from '../site-audit/gu
 function percent(value: number): string { return `${(value * 100).toFixed(2)}%`; }
 
 export async function buildProjectExport(project: SearchProject) {
-  const [datasets, siteRun, seoRows, semRows, businessRows, analyticsRows, semReport, tasks, baselines, changes, logSummary, trackingRuns, overseasReport] = await Promise.all([
+  const [datasets, siteRun, seoRows, semRows, businessRows, analyticsRows, semReport, baselines, changes, logSummary, trackingRuns, overseasReport] = await Promise.all([
     listDatasets(project.id),
     latestSiteRun(project.id),
     getProjectRows<SeoPerformanceRow>('seo_performance', project.id),
@@ -14,7 +14,6 @@ export async function buildProjectExport(project: SearchProject) {
     getProjectRows<BusinessOutcomeRow>('business_outcome', project.id),
     getProjectRows<AnalyticsPerformanceRow>('analytics_performance', project.id),
     latestSemReport(project.id),
-    listRemediationTasks(project.id),
     listAuditBaselines(project.id),
     listChangeRecords(project.id),
     latestLogSummary(project.id),
@@ -99,7 +98,6 @@ export async function buildProjectExport(project: SearchProject) {
         findings: overseasReport.findings.map(({ id: _id, ...finding }) => finding), gaps: overseasReport.gaps,
       } : null,
     },
-    remediation: tasks.map(({ id: _id, projectId: _projectId, status: _status, ...task }) => ({ ...task, affectedUrls: task.affectedUrls.slice(0, 50) })),
     baselines: baselines.slice(0, 20).map(({ projectId: _projectId, findingStates: _findingStates, ...baseline }) => ({
       ...baseline,
       findingSummary: Object.values(_findingStates).reduce<Record<string, number>>((summary, finding) => ({ ...summary, [finding.status]: (summary[finding.status] || 0) + 1 }), {}),
@@ -160,22 +158,6 @@ export async function projectExportMarkdown(project: SearchProject): Promise<str
       '',
     );
   }
-  lines.push('', '## 优化清单', '');
-  if (data.remediation.length) {
-    for (const task of data.remediation) lines.push(
-      `### ${task.priority} ${task.title}`,
-      '',
-      `- 负责人 / 工作量：${task.owner} / ${task.effort}`,
-      `- 证据：${task.evidence}`,
-      `- 修改：${task.action}`,
-      ...(task.antiPattern ? [`- 不要这样修改：${task.antiPattern}`] : []),
-      ...(task.limitations ? [`- 检测限制：${task.limitations}`] : []),
-      `- 验证：${task.verification}`,
-      `- 观察周期：${task.observationPeriod}`,
-      `- 回滚：${task.rollback}`,
-      '',
-    );
-  } else lines.push('尚无优化任务。');
   lines.push('', '## 修改前后基线', '');
   if (data.baselines.length) for (const baseline of data.baselines.slice(0, 5)) lines.push(`- ${baseline.createdAt}：页面 SEO 基础分 ${baseline.overallScore ?? '证据不足'}，站点问题 ${baseline.siteIssueCount}`);
   else lines.push('尚无复测基线。');

@@ -28,7 +28,7 @@ function roundPoint(value: number): number {
 
 export function buildScoreDetails(report: AuditReport): ScoreDetails {
   const scored = report.findings
-    .filter((finding) => finding.points > 0 && finding.scoreRatio !== null)
+    .filter((finding) => finding.points > 0 && finding.includedInScore !== false && finding.scoreRatio !== null)
     .map((finding) => {
       const earnedPoints = roundPoint(finding.points * (finding.scoreRatio ?? 0));
       return {
@@ -42,7 +42,7 @@ export function buildScoreDetails(report: AuditReport): ScoreDetails {
   const possiblePoints = roundPoint(scored.reduce((total, item) => total + item.possiblePoints, 0));
   const deductedPoints = roundPoint(possiblePoints - earnedPoints);
   const caps = report.findings
-    .filter((finding) => finding.status === 'failure' && finding.scoreCap !== undefined)
+    .filter((finding) => finding.status === 'failure' && finding.confidence === 'high' && finding.scoreCap !== undefined)
     .map((finding) => ({ finding, cap: finding.scoreCap! }))
     .sort((a, b) => a.cap - b.cap);
 

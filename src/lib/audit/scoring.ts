@@ -25,7 +25,8 @@ export function calculateScores(findings: AuditFinding[]): {
 } {
   const categoryScores = (Object.keys(CATEGORY_CONFIG) as AuditCategory[]).map((category) => {
     const categoryFindings = findings.filter((finding) => finding.category === category);
-    const applicable = categoryFindings.filter((finding) => !EXCLUDED_STATUSES.has(finding.status));
+    const scoredCategoryFindings = categoryFindings.filter((finding) => finding.points > 0 && finding.includedInScore !== false);
+    const applicable = scoredCategoryFindings.filter((finding) => !EXCLUDED_STATUSES.has(finding.status));
     const earnedPoints = applicable.reduce(
       (total, finding) => total + finding.points * (finding.scoreRatio ?? 0),
       0,
@@ -46,8 +47,11 @@ export function calculateScores(findings: AuditFinding[]): {
     };
   });
 
-  const measured = findings.filter((finding) => !EXCLUDED_STATUSES.has(finding.status));
-  const measurable = findings.filter((finding) => finding.status !== 'not_applicable');
+  // Coverage describes evidence for scored rules. Informational technical checks with
+  // zero points remain visible, but must not make the score look better supported.
+  const scoredFindings = findings.filter((finding) => finding.points > 0 && finding.includedInScore !== false);
+  const measured = scoredFindings.filter((finding) => !EXCLUDED_STATUSES.has(finding.status));
+  const measurable = scoredFindings.filter((finding) => finding.status !== 'not_applicable');
   const earned = measured.reduce(
     (total, finding) => total + finding.points * (finding.scoreRatio ?? 0),
     0,
@@ -56,7 +60,7 @@ export function calculateScores(findings: AuditFinding[]): {
   let overallScore = possible > 0 ? Math.round((earned / possible) * 100) : null;
 
   const caps = measured
-    .filter((finding) => finding.status === 'failure' && finding.scoreCap !== undefined)
+    .filter((finding) => finding.status === 'failure' && finding.confidence === 'high' && finding.scoreCap !== undefined)
     .map((finding) => finding.scoreCap!);
   if (overallScore !== null && caps.length > 0) overallScore = Math.min(overallScore, ...caps);
 

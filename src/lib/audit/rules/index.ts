@@ -34,17 +34,47 @@ export const EXTERNAL_DATA_GAPS = [
 
 export function inferAuditContext(snapshot: PageSnapshot): AuditContext {
   const schemaTypes = snapshot.jsonLd.flatMap((item) => item.types).map((type) => type.toLocaleLowerCase());
+  const pathname = (() => { try { return new URL(snapshot.url).pathname; } catch { return ''; } })();
+  const templateType = snapshot.templateType;
+  const h1 = snapshot.headings.find((heading) => heading.level === 1)?.text.toLocaleLowerCase() ?? '';
+  const title = snapshot.titleTags[0]?.toLocaleLowerCase() ?? '';
+  const callsToAction = snapshot.ctaTexts.join(' ').toLocaleLowerCase();
   let pageType: AuditContext['pageType'] = 'auto';
 
-  if (schemaTypes.some((type) => /article|newsarticle|blogposting/.test(type))) {
-    pageType = 'article';
-  } else if (schemaTypes.some((type) => /product|service|softwareapplication|webapplication/.test(type))) {
-    pageType = 'product_service';
+  if (pathname === '/' || templateType === 'home') {
+    pageType = 'home';
   } else if (
-    schemaTypes.some((type) => /collectionpage|itemlist|searchresultspage/.test(type))
+    templateType === 'search'
+    || templateType === 'filter'
+    || schemaTypes.some((type) => /searchresultspage/.test(type))
+  ) {
+    pageType = 'search_filter';
+  } else if (
+    schemaTypes.some((type) => /collectionpage|itemlist/.test(type))
+    || templateType === 'category'
+    || templateType === 'tag'
+    || templateType === 'pagination'
     || snapshot.links.some((link) => link.rel.includes('next') || link.rel.includes('prev'))
   ) {
     pageType = 'category';
+  } else if (
+    schemaTypes.some((type) => /softwareapplication|webapplication/.test(type))
+    || (snapshot.formCount > 0 && /(?:生成|检测|计算|搜索|上传|generate|check|calculate|search|upload)/i.test(`${h1} ${callsToAction}`))
+  ) {
+    pageType = 'tool';
+  } else if (
+    schemaTypes.some((type) => /product|service/.test(type))
+    || templateType === 'product'
+  ) {
+    pageType = 'product_service';
+  } else if (
+    schemaTypes.some((type) => /article|newsarticle|blogposting/.test(type))
+    || templateType === 'article'
+    || (snapshot.articleAuthorPresent && snapshot.articleDatePresent)
+  ) {
+    pageType = 'article';
+  } else if (/(?:产品|服务|pricing|price|product|service)/i.test(`${title} ${h1}`)) {
+    pageType = 'product_service';
   }
 
   return {

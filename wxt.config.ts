@@ -9,7 +9,7 @@ export default defineConfig({
     name: '__MSG_extName__',
     description: '__MSG_extDescription__',
     default_locale: 'zh_CN',
-    version: '0.6.0',
+    version: '0.8.0',
     minimum_chrome_version: '116',
     permissions: ['activeTab', 'tabs', 'scripting', 'storage', 'sidePanel'],
     optional_host_permissions: [

@@ -2,6 +2,8 @@ import type { EvidenceConfidence, SeoOpportunity, SeoPerformanceRow, SeoPerforma
 
 interface Totals { impressions: number; clicks: number; ctr: number }
 
+const SEARCH_DATA_MATURITY_DAYS = 2;
+
 function ratio(numerator: number, denominator: number): number {
   return denominator > 0 ? numerator / denominator : 0;
 }
@@ -37,22 +39,72 @@ function aggregate(rows: SeoPerformanceRow[]): Totals {
   return { impressions, clicks, ctr: ratio(clicks, impressions) };
 }
 
-function periodComparison(rows: SeoPerformanceRow[]): SeoPerformanceSummary['periodComparison'] {
-  const dated = rows.filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date)).sort((a, b) => a.date.localeCompare(b.date));
-  const dates = [...new Set(dated.map((row) => row.date))];
-  if (dates.length < 2) return undefined;
-  const days = Math.floor(dates.length / 2);
-  if (!days) return undefined;
-  const previousDates = new Set(dates.slice(-days * 2, -days));
-  const currentDates = new Set(dates.slice(-days));
-  const previous = aggregate(dated.filter((row) => previousDates.has(row.date)));
-  const current = aggregate(dated.filter((row) => currentDates.has(row.date)));
-  const change = {
+function parseIsoDate(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value ? null : parsed;
+}
+
+function isContinuousDates(dates: string[]): boolean {
+  return dates.every((date, index) => {
+    if (index === 0) return true;
+    const current = parseIsoDate(date);
+    const previous = parseIsoDate(dates[index - 1]!);
+    return Boolean(current && previous && current.getTime() - previous.getTime() === 86_400_000);
+  });
+}
+
+function isMatureDate(date: string, now = new Date()): boolean {
+  const parsed = parseIsoDate(date);
+  if (!parsed) return false;
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return parsed.getTime() <= todayUtc - SEARCH_DATA_MATURITY_DAYS * 86_400_000;
+}
+
+function changeBetween(current: Totals, previous: Totals) {
+  return {
     impressions: previous.impressions > 0 ? current.impressions / previous.impressions - 1 : null,
     clicks: previous.clicks > 0 ? current.clicks / previous.clicks - 1 : null,
     ctr: previous.ctr > 0 ? current.ctr / previous.ctr - 1 : null,
   };
-  return { current, previous, change, confidence: confidenceFor(current.impressions + previous.impressions, current.clicks + previous.clicks) };
+}
+
+function periodComparison(rows: SeoPerformanceRow[]): SeoPerformanceSummary['periodComparison'] {
+  if (!rows.length || rows.some((row) => !parseIsoDate(row.date))) return undefined;
+  const dated = [...rows].sort((a, b) => a.date.localeCompare(b.date));
+  const dates = [...new Set(dated.map((row) => row.date))];
+  if (dates.length < 4 || dates.length % 2 !== 0 || !isContinuousDates(dates) || !isMatureDate(dates.at(-1)!)) return undefined;
+  const days = dates.length / 2;
+  const previousDateList = dates.slice(0, days);
+  const currentDateList = dates.slice(days);
+  const previousDates = new Set(previousDateList);
+  const currentDates = new Set(currentDateList);
+  const previousRows = dated.filter((row) => previousDates.has(row.date));
+  const currentRows = dated.filter((row) => currentDates.has(row.date));
+  const previous = aggregate(previousRows);
+  const current = aggregate(currentRows);
+  const brandedPrevious = aggregate(previousRows.filter((row) => row.branded));
+  const brandedCurrent = aggregate(currentRows.filter((row) => row.branded));
+  const nonBrandedPrevious = aggregate(previousRows.filter((row) => !row.branded));
+  const nonBrandedCurrent = aggregate(currentRows.filter((row) => !row.branded));
+  return {
+    current,
+    previous,
+    change: changeBetween(current, previous),
+    confidence: confidenceFor(current.impressions + previous.impressions, current.clicks + previous.clicks),
+    period: {
+      days,
+      previousStart: previousDateList[0]!,
+      previousEnd: previousDateList.at(-1)!,
+      currentStart: currentDateList[0]!,
+      currentEnd: currentDateList.at(-1)!,
+      maturityDays: SEARCH_DATA_MATURITY_DAYS,
+    },
+    segments: {
+      branded: { current: brandedCurrent, previous: brandedPrevious, change: changeBetween(brandedCurrent, brandedPrevious) },
+      nonBranded: { current: nonBrandedCurrent, previous: nonBrandedPrevious, change: changeBetween(nonBrandedCurrent, nonBrandedPrevious) },
+    },
+  };
 }
 
 function makeOpportunities(rows: SeoPerformanceRow[], pageMatrix: NonNullable<SeoPerformanceSummary['pageMatrix']>, cannibalizationCandidates: SeoPerformanceSummary['cannibalizationCandidates']): SeoOpportunity[] {
@@ -177,6 +229,7 @@ export function summarizeSeoPerformance(rows: SeoPerformanceRow[]): SeoPerforman
     baselineGroups.set(bucket, [...(baselineGroups.get(bucket) || []), row]);
   }
   const ctrBaselines = [...baselineGroups.entries()].map(([bucket, values]) => ({ bucket, ...aggregate(values) })).sort((a, b) => a.bucket.localeCompare(b.bucket));
+  const comparison = periodComparison(rows);
   const summary: SeoPerformanceSummary = {
     rows: rows.length,
     impressions,
@@ -190,7 +243,7 @@ export function summarizeSeoPerformance(rows: SeoPerformanceRow[]): SeoPerforman
     pageMatrix,
     queryPageConflictCount: cannibalizationCandidates.length,
     ctrBaselines,
-    ...(periodComparison(rows) ? { periodComparison: periodComparison(rows)! } : {}),
+    ...(comparison ? { periodComparison: comparison } : {}),
   };
   summary.opportunities = makeOpportunities(rows, pageMatrix, cannibalizationCandidates);
   return summary;

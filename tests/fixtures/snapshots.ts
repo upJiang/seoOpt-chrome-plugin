@@ -82,7 +82,7 @@ export function healthySnapshot(overrides: Partial<PageSnapshot> = {}): PageSnap
       differences: [],
       error: null,
     },
-    performance: { lcp: 1300, cls: 0.02, fcp: 820, ttfb: 260 },
+    performance: { lcp: 1300, cls: 0.02, fcp: 820, ttfb: 260, inp: null, observedForMs: 800 },
     siteProbe: {
       page: {
         status: 200,
@@ -121,6 +121,7 @@ export function finding(overrides: Partial<AuditFinding> = {}): AuditFinding {
     priority: 'P3',
     points: 10,
     scoreRatio: 1,
+    includedInScore: true,
     evidence: '证据',
     impact: '影响',
     explanation: '原因',

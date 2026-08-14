@@ -145,16 +145,34 @@ export const contentRules: AuditRule[] = [
           verification: '使用产品可用性测试而非搜索内容指标。',
         };
       }
+      if (snapshot.visibleTextLength === 0) {
+        return {
+          status: 'failure',
+          priority: 'P1',
+          evidence: '渲染后的主要页面没有可见正文。',
+          impact: '用户和搜索系统无法从当前页面获得完成任务所需的信息。',
+          explanation: '这是空正文证据，不是固定字数检查。',
+          recommendation: '恢复页面真实主要内容，并确认它在正常加载和脚本失败边界下仍可读取。',
+          verification: '重新扫描并确认主要正文可见；同时检查原始 HTML 与渲染结果。',
+          owner: '内容',
+          confidence: 'high',
+          rootCauseId: 'page-value-delivery',
+        };
+      }
       if (snapshot.visibleTextLength < 100) {
         return {
           status: 'warning',
-          priority: 'P2',
-          evidence: `可见正文约 ${snapshot.visibleTextLength} 字符。`,
-          impact: '页面可能难以独立兑现搜索承诺。',
-          explanation: '没有适用于所有页面的固定字数，但极少正文需要人工确认价值是否完整。',
-          recommendation: '补充完成任务所需的结论、条件、证据和下一步，不为凑字数扩写。',
-          verification: '邀请目标用户仅凭该页完成判断，并结合查询转化验证。',
+          priority: 'P3',
+          scoreRatio: null,
+          includedInScore: false,
+          evidence: `当前页面可见信息很少，约 ${snapshot.visibleTextLength} 个字符，仅列为人工复核候选。`,
+          impact: '页面是否足以完成真实用户任务不能仅凭长度判断。',
+          explanation: '不同页面所需信息不同；插件不会使用固定字数作为内容质量标准。',
+          recommendation: '按页面类型核对是否已提供结论、适用条件、真实证据、限制和合理业务连接；信息已经足够时无需为工具扩写。',
+          verification: '让目标用户仅凭该页完成预期判断，并结合相关查询和有效业务结果复核。',
           owner: '内容',
+          confidence: 'low',
+          rootCauseId: 'page-value-delivery',
         };
       }
       return {

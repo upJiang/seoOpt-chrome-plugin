@@ -52,6 +52,9 @@ function normalizeProject(project: SearchProject): SearchProject {
       useGoogleAds: project.international?.useGoogleAds ?? false,
       useMicrosoftAds: project.international?.useMicrosoftAds ?? false,
       conversionDomains: project.international?.conversionDomains ?? [],
+      ...(project.international?.googleVerification
+        ? { googleVerification: project.international.googleVerification }
+        : {}),
     },
     sem: {
       ...project.sem,
@@ -161,9 +164,9 @@ export async function createProjectForOrigin(origin: string): Promise<SearchProj
       id: crypto.randomUUID(),
       name: new URL(normalizedOrigin).hostname,
       origin: normalizedOrigin,
-      market: '中国',
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
-      currency: 'CNY',
+      market: 'unknown',
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      currency: 'unknown',
       brandTerms: [],
       primaryConversion: '',
       createdAt: now,

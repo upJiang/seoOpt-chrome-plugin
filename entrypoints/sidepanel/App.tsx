@@ -7,7 +7,6 @@ import {
   ChevronDown,
   ChevronUp,
   CircleGauge,
-  Code2,
   Copy,
   Download,
   Eye,
@@ -55,16 +54,19 @@ import {
 import { normalizeAiEndpoint, permissionPatternForEndpoint } from '../../src/lib/ai-provider';
 import { originPermissionPattern } from '../../src/lib/page-access';
 import { buildScoreDetails } from '../../src/lib/audit/score-details';
+import { buildOverseasDiagnosis } from '../../src/lib/overseas/diagnostics';
 import {
   countIssueCategories,
   filterIssueFindings,
   type IssueStatusFilter,
 } from '../../src/lib/audit/issue-filters';
-import { buildRecommendationSections, getExpectedOutcome, getFindingCodeAdvice, groupRecommendationsByRootCause } from '../../src/lib/audit/recommendations';
+import {
+  buildOptimizationRecommendations,
+  type RecommendationCategory,
+} from '../../src/lib/audit/recommendations';
 import { SeoGrowthSections } from './SeoGrowthSections';
-import { clearAllProjectData, createProjectForOrigin, listAuditBaselines, listRemediationTasks, saveRemediationTask } from '../../src/lib/projects/db';
-import { baselineFromReport, diffBaselines, tasksFromFindings } from '../../src/lib/remediation/tasks';
-import type { AuditBaseline, RemediationTask } from '../../src/lib/projects/types';
+import { RecommendationSolutions } from './RecommendationSolutions';
+import { clearAllProjectData } from '../../src/lib/projects/db';
 import { SelectField } from './SelectField';
 import {
   CATEGORY_CONFIG,
@@ -133,6 +135,7 @@ const PERFORMANCE_METRICS = [
   { key: 'cls', label: 'CLS', description: '页面布局稳定程度', good: 0.1, poor: 0.25, unit: 'score' as const, threshold: '良好 ≤ 0.1' },
   { key: 'fcp', label: 'FCP', description: '首个内容出现速度', good: 1_800, poor: 3_000, unit: 'ms' as const, threshold: '良好 ≤ 1.8 s' },
   { key: 'ttfb', label: 'TTFB', description: '服务器首字节速度', good: 800, poor: 1_800, unit: 'ms' as const, threshold: '良好 ≤ 800 ms' },
+  { key: 'inp', label: 'INP', description: '真实交互响应速度', good: 200, poor: 500, unit: 'ms' as const, threshold: '有交互样本时良好 ≤ 200 ms' },
 ] as const;
 
 const STATUS_LABELS: Record<AuditStatus, string> = {
@@ -209,6 +212,13 @@ function scoreAvailabilityText(report: AuditReport): string {
 }
 
 function reportToMarkdown(report: AuditReport): string {
+  const recommendations = buildOptimizationRecommendations(report);
+  const overseasDiagnosis = report.snapshot.overseas ? buildOverseasDiagnosis({
+    snapshot: report.snapshot,
+    staticSnapshot: report.snapshot.overseas,
+    settings: { targetCountry: '', targetLanguage: report.snapshot.overseas.internationalSeo.targetLanguage, searchEngine: 'both', useGoogleAds: false, useMicrosoftAds: false, conversionDomains: [] },
+    expectedIndexState: report.context.expectedIndexState,
+  }) : null;
   const lines = [
     '# SEO优化 页面审计报告',
     '',
@@ -245,11 +255,45 @@ function reportToMarkdown(report: AuditReport): string {
       '',
     );
   }
+  lines.push('## 网站优化方案', '');
+  if (recommendations.length === 0) lines.push('本次取得的证据没有生成页面级优化建议。', '');
+  for (const recommendation of recommendations) {
+    lines.push(
+      `### ${recommendation.priority} · ${recommendation.title}`,
+      '',
+      `- 问题结论：${recommendation.conclusion}`,
+      `- 为什么会出现：${recommendation.seoMechanism}`,
+      `- 当前影响：${recommendation.currentImpact}`,
+      `- 推荐策略：${recommendation.strategy.summary}`,
+      `- 修改位置：${recommendation.strategy.modificationLayer}`,
+      `- 直接结果：${recommendation.expectedDirectResult}`,
+      `- 可能的搜索效果：${recommendation.possibleSearchEffect}`,
+      `- 不能保证：${recommendation.notGuaranteed}`,
+      `- 如何验证代码：${recommendation.verification.codeCorrectness.join('；')}`,
+      `- 如何验证搜索效果：${recommendation.verification.searchEffect.join('；')}`,
+      `- 不要这样修改：${recommendation.pitfalls.join('；')}`,
+      `- 检测限制：${recommendation.limitations.join('；')}`,
+      '',
+    );
+    for (const recipe of recommendation.implementationRecipes) {
+      lines.push(
+        `#### ${recipe.title}`,
+        '',
+        `- 适用技术：${recipe.applicableTechnology}`,
+        `- 通常修改：${recipe.modificationLocation}`,
+      );
+      if (recipe.placeholders.length) lines.push(`- 需要替换：${recipe.placeholders.map((item) => `${item.token}（${item.meaning}）`).join('；')}`);
+      if (recipe.variant.code) lines.push('', `\`\`\`${recipe.variant.language}`, recipe.variant.code, '\`\`\`');
+      if (recipe.lineExplanations.length) lines.push('', ...recipe.lineExplanations.map((item) => `- \`${item.code}\`：${item.explanation}`));
+      lines.push(`- 发布前检查：${recipe.prePublishChecks.join('；')}`, `- 回滚：${recipe.rollback}`, '');
+    }
+  }
   if (report.snapshot.overseas) {
     const overseas = report.snapshot.overseas;
     lines.push(
       '## 海外站优化',
       '',
+      `- 已确认正常 / 已确认问题 / 优化机会：${overseasDiagnosis?.normalCount ?? 0} / ${overseasDiagnosis?.issueCount ?? 0} / ${overseasDiagnosis?.opportunityCount ?? 0}`,
       `- 国际 SEO：${overseas.internationalSeo.status}`,
       `- 页面声明语言 / 正文语言候选 / 目标语言：${overseas.internationalSeo.htmlLang || '未声明'} / ${overseas.internationalSeo.detectedLanguage || '证据不足'} / ${overseas.internationalSeo.targetLanguage || '未设置'}`,
       `- hreflang：${overseas.internationalSeo.hreflangCount} 条；自引用：${overseas.internationalSeo.selfReference === null ? '不适用或尚未检测' : overseas.internationalSeo.selfReference ? '已观察到' : '未观察到'}`,
@@ -259,9 +303,17 @@ function reportToMarkdown(report: AuditReport): string {
       '',
       ...overseas.tags.map((tag) => `- ${tag.platform}：${tag.ids.join('、') || '未识别 ID'}；初始化 ${tag.initialized ? '已观察到' : '未观察到'}；请求 ${tag.requestObserved ? '已观察到' : '未观察到'}`),
       '',
+      '### 已确认问题',
+      '',
+      ...(overseasDiagnosis?.issues.map((item) => `- ${item.title}：${item.evidence}`) ?? ['- 无']),
+      '',
+      '### 优化机会',
+      '',
+      ...(overseasDiagnosis?.opportunities.map((item) => `- ${item.title}（${item.applicability}）：${item.action}`) ?? ['- 无']),
+      '',
       '### 海外检测边界',
       '',
-      ...overseas.limitations.map((item) => `- ${item}`),
+      ...(overseasDiagnosis?.evidenceGaps.map((item) => `- ${item.title}：${item.unavailable} ${item.limitation}`) ?? overseas.limitations.map((item) => `- ${item}`)),
       '',
     );
   }
@@ -288,7 +340,14 @@ function reportToMarkdown(report: AuditReport): string {
 }
 
 function downloadJson(report: AuditReport): void {
-  const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json;charset=utf-8' });
+  const overseasDiagnosis = report.snapshot.overseas ? buildOverseasDiagnosis({
+    snapshot: report.snapshot,
+    staticSnapshot: report.snapshot.overseas,
+    settings: { targetCountry: '', targetLanguage: report.snapshot.overseas.internationalSeo.targetLanguage, searchEngine: 'both', useGoogleAds: false, useMicrosoftAds: false, conversionDomains: [] },
+    expectedIndexState: report.context.expectedIndexState,
+  }) : null;
+  const payload = { ...report, recommendations: buildOptimizationRecommendations(report), overseasDiagnosis };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -322,37 +381,6 @@ function IconButton({
     >
       {children}
     </button>
-  );
-}
-
-function CodeAdvice({ finding, compact = false }: { finding: AuditFinding; compact?: boolean }) {
-  const advice = getFindingCodeAdvice(finding);
-  const [copied, setCopied] = useState(false);
-  const copyCode = async () => {
-    if (!advice.code) return;
-    await navigator.clipboard.writeText(advice.code);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1_500);
-  };
-  return (
-    <div className={`code-advice${compact ? ' code-advice-compact' : ''}`}>
-      <div className="code-advice-heading">
-        <span><Code2 size={16} aria-hidden="true" />代码修改建议</span>
-        <span className="code-advice-type">{advice.label}</span>
-      </div>
-      {advice.code ? (
-        <>
-          <div className="code-advice-toolbar">
-            <span>{advice.language}</span>
-            <button type="button" className="code-copy-button" onClick={() => void copyCode()} aria-label={`复制${advice.label}`}>
-              {copied ? <Check size={15} /> : <Copy size={15} />}{copied ? '已复制' : '复制'}
-            </button>
-          </div>
-          <pre><code>{advice.code}</code></pre>
-        </>
-      ) : <p className="code-advice-empty">不适合直接用代码修复</p>}
-      <p className="code-advice-note">{advice.note}</p>
-    </div>
   );
 }
 
@@ -420,10 +448,36 @@ function pointText(value: number): string {
 }
 
 function ScoreBreakdown({ report, onOpenIssue }: { report: AuditReport; onOpenIssue: (finding: AuditFinding) => void }) {
-  const [mode, setMode] = useState<'deducted' | 'passed'>('deducted');
   const details = useMemo(() => buildScoreDetails(report), [report]);
-  const items = mode === 'deducted' ? details.deducted : details.passed;
   const strictestCap = details.caps[0];
+  const renderItems = (items: typeof details.passed, mode: 'passed' | 'deducted') => (
+    <div className="score-detail-list">
+      {items.length > 0 ? items.map((item) => {
+        const content = (
+          <>
+            <span className={`score-detail-state status-${item.finding.status}`} aria-hidden="true">{item.finding.status === 'pass' ? <Check size={16} /> : <AlertCircle size={16} />}</span>
+            <span className="score-detail-copy">
+              <span className="score-detail-title">{item.finding.title}</span>
+              <span className="score-detail-meta">{CATEGORY_LABELS[item.finding.category]} · {STATUS_LABELS[item.finding.status]}</span>
+              <span className="score-detail-evidence">{item.finding.evidence}</span>
+            </span>
+            <span className="score-detail-points">
+              <span>{pointText(item.earnedPoints)} / {pointText(item.possiblePoints)}</span>
+              <span>{mode === 'deducted'
+                ? `扣 ${pointText(item.deductedPoints)}`
+                : item.deductedPoints === 0
+                  ? '满分'
+                  : `获得 ${pointText(item.earnedPoints)}`}</span>
+            </span>
+            {mode === 'deducted' ? <ArrowRight className="score-detail-arrow" size={17} aria-hidden="true" /> : null}
+          </>
+        );
+        return mode === 'deducted'
+          ? <button type="button" className="score-detail-row actionable" key={item.finding.id} onClick={() => onOpenIssue(item.finding)} aria-label={`查看问题：${item.finding.title}`}>{content}</button>
+          : <div className="score-detail-row" key={item.finding.id}>{content}</div>;
+      }) : <p className="empty-copy">本次没有{mode === 'deducted' ? '扣分项' : '得分项'}。</p>}
+    </div>
+  );
   return (
     <section className="plain-section score-breakdown" aria-labelledby="score-breakdown-title">
       <div className="section-heading">
@@ -451,40 +505,14 @@ function ScoreBreakdown({ report, onOpenIssue }: { report: AuditReport; onOpenIs
           </div>
         </div>
       ) : null}
-      <div className="breakdown-switch" role="tablist" aria-label="得分和扣分明细">
-        <button type="button" role="tab" aria-selected={mode === 'deducted'} className={mode === 'deducted' ? 'active' : ''} onClick={() => setMode('deducted')}>
-          扣分项 <span>{details.deducted.length}</span>
-        </button>
-        <button type="button" role="tab" aria-selected={mode === 'passed'} className={mode === 'passed' ? 'active' : ''} onClick={() => setMode('passed')}>
-          得分项 <span>{details.passed.length}</span>
-        </button>
-      </div>
-      <div className="score-detail-list" role="tabpanel">
-        {items.length > 0 ? items.map((item) => {
-          const content = (
-            <>
-              <span className={`score-detail-state status-${item.finding.status}`} aria-hidden="true">{item.finding.status === 'pass' ? <Check size={16} /> : <AlertCircle size={16} />}</span>
-              <span className="score-detail-copy">
-                <span className="score-detail-title">{item.finding.title}</span>
-                <span className="score-detail-meta">{CATEGORY_LABELS[item.finding.category]} · {STATUS_LABELS[item.finding.status]}</span>
-                <span className="score-detail-evidence">{item.finding.evidence}</span>
-              </span>
-              <span className="score-detail-points">
-                <span>{pointText(item.earnedPoints)} / {pointText(item.possiblePoints)}</span>
-                <span>{mode === 'deducted'
-                  ? `扣 ${pointText(item.deductedPoints)}`
-                  : item.deductedPoints === 0
-                    ? '满分'
-                    : `获得 ${pointText(item.earnedPoints)}`}</span>
-              </span>
-              {mode === 'deducted' ? <ArrowRight className="score-detail-arrow" size={17} aria-hidden="true" /> : null}
-            </>
-          );
-          return mode === 'deducted'
-            ? <button type="button" className="score-detail-row actionable" key={item.finding.id} onClick={() => onOpenIssue(item.finding)} aria-label={`查看问题：${item.finding.title}`}>{content}</button>
-            : <div className="score-detail-row" key={item.finding.id}>{content}</div>;
-        }) : <p className="empty-copy">本次没有{mode === 'deducted' ? '扣分项' : '得分项'}。</p>}
-      </div>
+      <section className="score-detail-group" aria-labelledby="passed-score-title">
+        <h3 id="passed-score-title">已通过与获得分数 <span>{details.passed.length}</span></h3>
+        {renderItems(details.passed, 'passed')}
+      </section>
+      <section className="score-detail-group deducted-group" aria-labelledby="deducted-score-title">
+        <h3 id="deducted-score-title">扣分项目 <span>{details.deducted.length}</span></h3>
+        {renderItems(details.deducted, 'deducted')}
+      </section>
       <p className="section-note concept-note">不可测和不适用规则不会进入分母。页面 SEO 基础分按本次适用规则归一化；若存在明确索引阻断，还会单独触发封顶。</p>
     </section>
   );
@@ -624,84 +652,6 @@ function FilterMenu<T extends string>({
   );
 }
 
-function TopRemediationQueue({ report, onOpenIssue, onRescan }: {
-  report: AuditReport;
-  onOpenIssue: (finding: AuditFinding) => void;
-  onRescan: (context: AuditContext) => Promise<void>;
-}) {
-  const [tasks, setTasks] = useState<RemediationTask[]>([]);
-  const [baselines, setBaselines] = useState<AuditBaseline[]>([]);
-  const [retesting, setRetesting] = useState(false);
-  const [loadError, setLoadError] = useState('');
-  const actionableByRoot = useMemo(() => new Map(report.findings
-    .filter((finding) => finding.status === 'failure' || finding.status === 'warning')
-    .map((finding) => [finding.rootCauseId || finding.ruleId, finding])), [report.findings]);
-
-  const refresh = useCallback(async () => {
-    try {
-      const project = await createProjectForOrigin(new URL(report.url).origin);
-      const [storedTasks, storedBaselines] = await Promise.all([
-        listRemediationTasks(project.id),
-        listAuditBaselines(project.id),
-      ]);
-      const generated = tasksFromFindings(project.id, report.findings, storedTasks);
-      await Promise.all(generated.map((task) => saveRemediationTask(task)));
-      let nextBaselines = storedBaselines;
-      if (!storedBaselines.some((baseline) => baseline.reportId === report.id)) {
-        const baseline = baselineFromReport(project.id, report);
-        await rpc({ type: 'SAVE_AUDIT_BASELINE', baseline });
-        nextBaselines = [baseline, ...storedBaselines];
-      }
-      setTasks(generated);
-      setBaselines(nextBaselines);
-    } catch (reason) {
-      setLoadError(reason instanceof Error ? reason.message : '无法加载优化建议。');
-    }
-  }, [report]);
-
-  useEffect(() => { void refresh(); }, [refresh]);
-  const currentBaseline = baselines.find((baseline) => baseline.reportId === report.id) || baselines[0];
-  const previousBaseline = baselines.find((baseline) => baseline.id !== currentBaseline?.id);
-  const baselineDiff = currentBaseline ? diffBaselines(previousBaseline, currentBaseline) : null;
-  const topTasks = tasks.filter((task) => actionableByRoot.has(task.rootCauseId)).slice(0, 3);
-
-  const retest = async () => {
-    setRetesting(true);
-    setLoadError('');
-    try { await onRescan(report.context); }
-    catch (reason) { setLoadError(reason instanceof Error ? reason.message : '重新验证失败。'); }
-    finally { setRetesting(false); }
-  };
-
-  return (
-    <section className="plain-section top-remediation" aria-labelledby="top-remediation-title">
-      <div className="section-heading">
-        <div><p className="section-kicker">先做这三项</p><h2 id="top-remediation-title">优先优化</h2></div>
-        <button type="button" className="secondary-button" disabled={retesting} onClick={() => void retest()}><RefreshCw className={retesting ? 'spinner' : ''} size={17} />{retesting ? '正在复测' : '重新验证'}</button>
-      </div>
-      {baselineDiff && previousBaseline ? (
-        <div className="baseline-diff" role="status">
-          <span>与上次扫描相比</span>
-          <p>基础分 {baselineDiff.score.before ?? '—'} → {baselineDiff.score.after ?? '—'}{baselineDiff.score.delta === null ? '' : `（${baselineDiff.score.delta >= 0 ? '+' : ''}${baselineDiff.score.delta}）`} · 已通过 {baselineDiff.fixedRules.length} 项 · 新增 {baselineDiff.newRules.length} 项</p>
-        </div>
-      ) : <p className="section-note">先按这三项建议修改页面，再点击“重新验证”查看扫描前后的差异。</p>}
-      {loadError ? <div className="inline-alert" role="alert"><AlertCircle size={16} />{loadError}</div> : null}
-      {topTasks.length ? <div className="top-remediation-list">{topTasks.map((task, index) => {
-        const finding = actionableByRoot.get(task.rootCauseId);
-        return (
-          <article className={`top-remediation-item priority-${task.priority.toLowerCase()}`} key={task.id}>
-            <span className="remediation-order">{index + 1}</span>
-            <div className="remediation-copy"><span className="remediation-priority">{task.priority} · {task.owner} · {task.effort}工作量</span><h3>{task.title}</h3><p>{task.action}</p></div>
-            <div className="remediation-actions">
-              {finding ? <button type="button" className="text-button" onClick={() => onOpenIssue(finding)}>查看证据<ArrowRight size={16} /></button> : null}
-            </div>
-          </article>
-        );
-      })}</div> : <div className="top-remediation-empty"><Check size={18} /><span>当前没有失败或警告项。继续结合搜索表现和站点审计验证站外结果。</span></div>}
-    </section>
-  );
-}
-
 function Overview({
   report,
   onContextUpdated,
@@ -716,6 +666,9 @@ function Overview({
   const [section, setSection] = useState<OverviewSection>('summary');
   const counts = priorityCounts(report);
   const scoreExplanation = scoreAvailabilityText(report);
+  const confidence = report.dataQuality?.confidence
+    ?? (report.coverage >= 80 ? 'high' : report.coverage >= 60 ? 'medium' : 'low');
+  const confidenceLabel = confidence === 'high' ? '高' : confidence === 'medium' ? '中' : '证据不足';
   return (
     <div className="view-stack">
       <nav className="overview-sections" role="tablist" aria-label="概览内容">
@@ -741,15 +694,16 @@ function Overview({
             <ScoreRing score={report.overallScore} label={report.scoreLabel} provisional={report.coverage < 60} />
           </section>
 
-          <QuickEvidenceStrip report={report} />
-          <TopRemediationQueue report={report} onOpenIssue={onOpenIssue} onRescan={onRescan} />
-          <ScoreBreakdown report={report} onOpenIssue={onOpenIssue} />
-
           <section className="metric-strip" aria-label="测量和问题概况">
             <div className="metric-cell">
               <span className="metric-label">测量覆盖</span>
               <span className="metric-value">{report.coverage}%</span>
               <span className="metric-note">{report.measuredChecks}/{report.measurableChecks} 项</span>
+            </div>
+            <div className="metric-cell evidence-confidence">
+              <span className="metric-label">证据可信度</span>
+              <span className="metric-value">{confidenceLabel}</span>
+              <span className="metric-note">按本次证据完整度</span>
             </div>
             {(['P0', 'P1', 'P2', 'P3'] as AuditPriority[]).map((priority) => (
               <div className={`metric-cell priority-${priority.toLocaleLowerCase()}`} key={priority}>
@@ -759,7 +713,9 @@ function Overview({
               </div>
             ))}
           </section>
-          <p className="concept-explainer metric-explainer"><span>怎么看：</span>覆盖率是本次成功取得证据的规则比例；P0 必须先处理，P1 高影响，P2 属于增长优化，P3 先观察。它们表示处理顺序，不是问题数量越多就一定越差。</p>
+          <p className="concept-explainer metric-explainer"><span>怎么看：</span>覆盖率表示本次成功取得证据的计分规则比例；可信度表示这些证据支持结论的强弱。P0/P1 只用于业务前提明确且证据充分的问题，数量本身不代表网站一定更差。</p>
+
+          <ScoreBreakdown report={report} onOpenIssue={onOpenIssue} />
 
           <section className="plain-section" aria-labelledby="category-title">
             <div className="section-heading">
@@ -789,7 +745,7 @@ function Overview({
                 </div>
               );})}
             </div>
-            <p className="section-note concept-note">分类分数用于定位薄弱环节，不建议为了满分机械修改。先处理会阻断抓取、索引或用户任务的问题，再结合真实搜索表现决定增长项。</p>
+            <p className="section-note concept-note">分类分数用于看清证据集中在哪类信号，不建议为了满分机械修改。实际收录、排名、点击和业务效果仍要与外部数据分开判断。</p>
           </section>
 
           <section className="plain-section performance-overview" aria-labelledby="overview-performance-title">
@@ -801,10 +757,16 @@ function Overview({
               <MonitorCog size={18} aria-hidden="true" />
             </div>
             <PerformanceMetrics performance={report.snapshot.performance} />
-            <p className="section-note concept-note">怎么看：LCP 是主要内容多久出现，CLS 是页面会不会突然跳动，FCP 是第一块内容多久可见，TTFB 是服务器多久开始返回。这里只是当前设备与网络的一次测试，不等同于所有真实用户的表现。</p>
+            <p className="section-note concept-note">怎么看：LCP 是主要内容多久出现，CLS 是页面会不会突然跳动，FCP 是第一块内容多久可见，TTFB 是服务器多久开始返回。INP 只有本次扫描观察到真实交互时才显示样本。这里只是当前设备与网络的一次测试，不等同于所有真实用户的表现。</p>
           </section>
 
-          <SeoGrowthSections report={report} onContextUpdated={onContextUpdated} onRescan={onRescan} mode="summary" />
+          <section className="plain-section external-data" aria-labelledby="summary-external-data-title">
+            <div className="section-heading">
+              <div><p className="section-kicker">当前页面无法直接证明</p><h2 id="summary-external-data-title">检测不到的外部结果</h2><p className="heading-help">实际收录、排名、点击和转化发生在搜索平台与业务系统中，不会因为页面代码正确就自动成立。</p></div>
+              <Info size={18} aria-hidden="true" />
+            </div>
+            <ul className="clean-list">{report.externalDataGaps.map((gap) => <li key={gap}>{gap}</li>)}</ul>
+          </section>
         </div>
       ) : null}
 
@@ -848,89 +810,51 @@ function RecommendationsView({
   report,
   onLocate,
   onOpenIssue,
+  selectedRecommendationId,
 }: {
   report: AuditReport;
   onLocate: (finding: AuditFinding) => void;
   onOpenIssue: (finding: AuditFinding) => void;
+  selectedRecommendationId: string | null;
 }) {
-  const sections = useMemo(() => buildRecommendationSections(report.findings), [report.findings]);
-  const rootGroups = useMemo(() => groupRecommendationsByRootCause(report.findings), [report.findings]);
-  const groupForFinding = (finding: AuditFinding) => rootGroups.find((group) => group.id === finding.rootCauseId);
-  const actionableCount = sections.reduce((total, section) => total + section.findings.length, 0);
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(sections.flatMap((section) => section.findings[0]?.id ? [section.findings[0].id] : [])));
+  const recommendations = useMemo(() => buildOptimizationRecommendations(report), [report]);
+  const [category, setCategory] = useState<RecommendationCategory | 'all'>('all');
+  const visible = category === 'all' ? recommendations : recommendations.filter((item) => item.category === category);
+  useLayoutEffect(() => {
+    const selected = recommendations.find((item) => item.rootCauseId === selectedRecommendationId);
+    if (!selectedRecommendationId || !selected) return;
+    setCategory(selected.category);
+  }, [recommendations, selectedRecommendationId]);
+
+  const categoryOptions: Array<{ value: RecommendationCategory | 'all'; label: string }> = [
+    { value: 'all', label: '全部建议' },
+    { value: 'access_indexing', label: '页面访问与收录' },
+    { value: 'content_intent', label: '标题、内容与搜索意图' },
+    { value: 'links_media_schema', label: '内链、媒体与结构化数据' },
+    { value: 'performance_resources', label: '性能与资源加载' },
+    { value: 'international', label: '国际 SEO' },
+    { value: 'tracking', label: '数据追踪' },
+    { value: 'sem', label: 'SEM' },
+  ];
+
   return (
     <div className="view-stack recommendations-view">
       <section className="recommendation-intro" aria-labelledby="recommendation-title">
         <div>
-          <p className="section-kicker">执行队列</p>
-          <h2 id="recommendation-title">从哪里开始优化</h2>
-          <p>按风险、影响和工作量自动整理。预期效果不是排名承诺，修改后先重新扫描，再结合搜索与转化数据验证。</p>
+          <p className="section-kicker">完整修改策略与代码</p>
+          <h2 id="recommendation-title">网站优化方案</h2>
+          <p>建议按证据、影响和修改成本排序。每项都区分代码直接结果、可能的搜索效果和不能保证的结果。</p>
         </div>
-        <span className="recommendation-count" aria-label={`${actionableCount} 项待优化`}>
-          <span>{actionableCount}</span> 项
-        </span>
+        <SelectField label="建议分类" value={category} onChange={(value) => setCategory(value as RecommendationCategory | 'all')} options={categoryOptions} />
       </section>
-      {actionableCount === 0 ? (
-        <section className="recommendation-empty" role="status">
-          <Check size={26} aria-hidden="true" />
-          <div><h2>当前没有页面级待办</h2><p>继续结合搜索平台、真实用户性能和转化数据验证站外结果。</p></div>
-        </section>
-      ) : sections.map((section) => (
-        section.findings.length > 0 ? (
-          <section className={`recommendation-section recommendation-${section.id}`} key={section.id} aria-labelledby={`recommendation-${section.id}`}>
-            <div className="recommendation-section-heading">
-              <span className="recommendation-section-icon" aria-hidden="true">
-                {section.id === 'quick_wins' ? <Zap size={17} /> : <Lightbulb size={17} />}
-              </span>
-              <div>
-                <h2 id={`recommendation-${section.id}`}>{section.title}</h2>
-                <p>{section.description}</p>
-              </div>
-              <span className="recommendation-section-count">{section.findings.length}</span>
-            </div>
-            <div className="recommendation-list">
-              {section.findings.map((finding) => {
-                const isExpanded = expanded.has(finding.id);
-                return (
-                <article className="recommendation-item" key={finding.id}>
-                  <button type="button" className="recommendation-summary" aria-expanded={isExpanded} onClick={() => setExpanded((current) => {
-                    const next = new Set(current);
-                    if (next.has(finding.id)) next.delete(finding.id); else next.add(finding.id);
-                    return next;
-                  })}>
-                    <span className="recommendation-summary-copy">
-                      <span className="recommendation-meta"><span className={`priority-badge priority-${finding.priority.toLocaleLowerCase()}`}>{finding.priority}</span><span>{CATEGORY_LABELS[finding.category]}</span><span>{finding.owner} · {finding.effort}工作量</span></span>
-                      <span className="recommendation-title-text">{finding.title}</span>
-                      <span className="recommendation-preview">{finding.recommendation}</span>
-                    </span>
-                    {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                  </button>
-                  {isExpanded ? <div className="recommendation-expanded">
-                    {groupForFinding(finding) && groupForFinding(finding)!.findings.length > 1 ? <p className="root-cause-summary">同一根因合并 {groupForFinding(finding)!.findings.length} 个问题，影响 {Math.max(1, groupForFinding(finding)!.affectedUrls.length)} 个 URL。</p> : null}
-                    <dl className="recommendation-detail">
-                      <div><dt>证据</dt><dd>{finding.evidence}</dd></div>
-                      <div><dt>为什么要优化</dt><dd>{finding.explanation}</dd></div>
-                      <div><dt>当前影响</dt><dd>{finding.impact}</dd></div>
-                      <div className="recommendation-outcome"><dt>优化后预期</dt><dd>{getExpectedOutcome(finding)}</dd></div>
-                      <div><dt>怎么做</dt><dd>{finding.recommendation}</dd></div>
-                      <div><dt>如何验证</dt><dd>{finding.verification}</dd></div>
-                      <div><dt>不要这样修改</dt><dd>{finding.antiPattern || '不要同时叠加多项无关改动，也不要在没有验证证据时删除内容或代码。'}</dd></div>
-                      <div><dt>检测证据与限制</dt><dd>{finding.limitations || '当前结论基于本次页面证据；实际搜索结果还需要搜索平台和业务数据验证。'}</dd></div>
-                      <div><dt>观察与回滚</dt><dd>{finding.observationPeriod}；{finding.rollback}</dd></div>
-                    </dl>
-                    <CodeAdvice finding={finding} compact />
-                    <div className="recommendation-actions">
-                      {finding.locator ? <button type="button" className="secondary-button" onClick={() => onLocate(finding)}><MapPin size={16} />网页定位</button> : null}
-                      <button type="button" className="text-button" onClick={() => onOpenIssue(finding)}>查看完整问题<ArrowRight size={16} /></button>
-                    </div>
-                  </div> : null}
-                </article>
-              );})}
-            </div>
-          </section>
-        ) : null
-      ))}
-
+      <RecommendationSolutions
+        recommendations={visible}
+        selectedRecommendationId={selectedRecommendationId}
+        pageFindingIds={new Set(report.findings.map((item) => item.id))}
+        {...(category === 'sem' ? { emptyMessage: 'SEM 建议需要广告表现与业务结果数据。本次页面扫描不会虚构预算、出价或停止策略，可在 SEM 的“数据”页导入报表后查看诊断。' } : {})}
+        onLocate={onLocate}
+        onOpenIssue={onOpenIssue}
+      />
     </div>
   );
 }
@@ -940,11 +864,13 @@ function IssueCard({
   expanded,
   onToggle,
   onLocate,
+  onOpenRecommendation,
 }: {
   finding: AuditFinding;
   expanded: boolean;
   onToggle: () => void;
   onLocate: () => void;
+  onOpenRecommendation: () => void;
 }) {
   const actionable = finding.status === 'failure' || finding.status === 'warning';
   return (
@@ -963,48 +889,19 @@ function IssueCard({
       {expanded ? (
         <div className="issue-details">
           <dl className="explanation-grid">
-            <div>
-              <dt>影响</dt>
-              <dd>{finding.impact}</dd>
-            </div>
-            <div>
-              <dt>为什么</dt>
-              <dd>{finding.explanation}</dd>
-            </div>
-            <div>
-              <dt>修改步骤</dt>
-              <dd>{finding.recommendation}</dd>
-            </div>
-            <div>
-              <dt>验证方法</dt>
-              <dd>{finding.verification}</dd>
-            </div>
-            <div>
-              <dt>观察周期</dt>
-              <dd>{finding.observationPeriod}</dd>
-            </div>
-            <div>
-              <dt>风险与回滚</dt>
-              <dd>{finding.rollback}</dd>
-            </div>
-            <div>
-              <dt>不要这样修改</dt>
-              <dd>{finding.antiPattern || '不要同时叠加多项无关改动，也不要在没有验证证据时删除内容或代码。'}</dd>
-            </div>
-            <div>
-              <dt>检测证据与限制</dt>
-              <dd>{finding.limitations || '当前结论基于本次页面证据；实际搜索结果还需要搜索平台和业务数据验证。'}</dd>
-            </div>
+            <div><dt>发现位置</dt><dd>{finding.locator ? finding.locator.segments.join(' → ') : finding.evidenceSource}</dd></div>
+            <div><dt>直接证据</dt><dd>{finding.evidence}</dd></div>
+            <div><dt>影响范围</dt><dd>{finding.scope === 'page' ? '当前页面' : finding.scope === 'site_sample' ? `站点抽样 · ${finding.affectedUrls.length} 个 URL` : '搜索表现数据'}；{finding.impact}</dd></div>
+            <div><dt>证据可信度</dt><dd>{finding.confidence === 'high' ? '高' : finding.confidence === 'medium' ? '中' : '低'}；{finding.limitations || '当前结论来自本次可取得的页面证据。'}</dd></div>
           </dl>
-          <CodeAdvice finding={finding} />
           <div className="issue-footer">
             <span>{CATEGORY_LABELS[finding.category]} · {finding.owner} · {finding.effort}工作量</span>
-            {actionable && finding.locator ? (
+            <div className="issue-footer-actions"><button type="button" className="primary-button compact-button" onClick={onOpenRecommendation}>查看完整优化建议<ArrowRight size={16} /></button>{actionable && finding.locator ? (
               <button type="button" className="secondary-button compact-button" onClick={onLocate}>
                 <MapPin size={16} />
                 网页定位
               </button>
-            ) : null}
+            ) : null}</div>
           </div>
         </div>
       ) : null}
@@ -1041,10 +938,12 @@ function scrollIssueCardIntoView(element: HTMLElement | null): void {
 function IssueList({
   findings,
   onLocate,
+  onOpenRecommendation,
   initialExpandedId,
 }: {
   findings: AuditFinding[];
   onLocate: (finding: AuditFinding) => void;
+  onOpenRecommendation: (finding: AuditFinding) => void;
   initialExpandedId: string | null;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId);
@@ -1101,6 +1000,7 @@ function IssueList({
             expanded={expandedId === finding.id}
             onToggle={() => toggleIssue(finding)}
             onLocate={() => onLocate(finding)}
+            onOpenRecommendation={() => onOpenRecommendation(finding)}
           />
         ))}
       </div>
@@ -1125,6 +1025,7 @@ function IssueList({
                 expanded={expandedId === finding.id}
                 onToggle={() => toggleIssue(finding)}
                 onLocate={() => onLocate(finding)}
+                onOpenRecommendation={() => onOpenRecommendation(finding)}
               />
             </div>
           );
@@ -1137,10 +1038,12 @@ function IssueList({
 function IssuesView({
   report,
   onLocate,
+  onOpenRecommendation,
   initialExpandedId,
 }: {
   report: AuditReport;
   onLocate: (finding: AuditFinding) => void;
+  onOpenRecommendation: (finding: AuditFinding) => void;
   initialExpandedId: string | null;
 }) {
   const stateKey = `seo-opt:issue-view:${new URL(report.url).origin}`;
@@ -1231,7 +1134,7 @@ function IssuesView({
           </IconButton>
         </div>
       </div>
-      <IssueList findings={findings} onLocate={onLocate} initialExpandedId={initialExpandedId} />
+      <IssueList findings={findings} onLocate={onLocate} onOpenRecommendation={onOpenRecommendation} initialExpandedId={initialExpandedId} />
     </div>
   );
 }
@@ -1485,10 +1388,10 @@ function SiteSignalsView({ report, onReportUpdated }: { report: AuditReport; onR
 }
 
 const AI_SUGGESTED_QUESTIONS = [
-  '按 P0 到 P3 告诉我应该先修什么，并给出执行顺序。',
-  '把当前问题整理成开发可以直接执行的修改清单。',
-  '重点解释性能指标的问题、原因和验证方法。',
-  '基于当前证据制定一个 7 天 SEO 优化计划。',
+  '用普通话解释当前网站的问题和优化策略。',
+  '输出开发可直接使用的代码修改说明。',
+  '根据页面类型输出内容改写方案。',
+  '输出完整的 SEO 与 SEM 专家分析。',
 ];
 
 function AiMarkdown({ content }: { content: string }) {
@@ -1649,7 +1552,7 @@ function AiChatView({
         <>
           <div className="ai-context-note">
             <Info size={16} aria-hidden="true" />
-            <span>每轮都会携带最新评分、全部规则证据、页面与站点信号、性能和数据缺口；不会发送完整 DOM、Cookie 或表单值。</span>
+            <span>每轮都会携带最新评分、全部规则证据、根因分组、优化策略与代码、页面和站点信号；不会发送完整 DOM、Cookie 或表单值。</span>
           </div>
 
           <div className="ai-timeline" ref={timelineRef} aria-live="polite" aria-label="AI 对话记录" aria-busy={loading}>
@@ -1657,7 +1560,7 @@ function AiChatView({
               <div className="ai-welcome">
                 <span className="playful-icon" aria-hidden="true"><MessageCircle size={22} /></span>
                 <h2>从当前审计继续追问</h2>
-                <p>可以问执行顺序、代码修改、性能瓶颈或验证方法。</p>
+                <p>可以继续追问问题原因、代码修改、内容策略或验证方法。</p>
                 <div className="ai-suggestions">
                   {AI_SUGGESTED_QUESTIONS.map((question) => (
                     <button type="button" key={question} onClick={() => void submit(question)} disabled={report.stale || loading}>
@@ -1740,7 +1643,7 @@ function AiChatView({
               id="ai-question"
               value={draft}
               maxLength={2_000}
-              placeholder="例如：先修哪三个问题，怎么验证？"
+              placeholder="例如：解释 Canonical 问题，并给出 Next.js 修改代码。"
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
@@ -2004,7 +1907,7 @@ function SettingsDialog({
 }
 
 export function App() {
-  const [view, setView] = useState<ViewId>('overseas');
+  const [view, setView] = useState<ViewId>('overview');
   const [scanState, setScanState] = useState<ScanState>({ status: 'idle', tabId: null });
   const [activeStateLoaded, setActiveStateLoaded] = useState(false);
   const [preferences, setPreferencesState] = useState<UserPreferences>(DEFAULT_PREFERENCES);
@@ -2018,6 +1921,7 @@ export function App() {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
+  const [selectedRecommendationId, setSelectedRecommendationId] = useState<string | null>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const activeAiRequestRef = useRef<string | null>(null);
   const cancelledAiRequestsRef = useRef(new Set<string>());
@@ -2049,7 +1953,6 @@ export function App() {
       rpc<{ hasKey: boolean }>({ type: 'GET_AI_KEY_STATUS' }).then(({ hasKey }) => setHasAiKey(hasKey)),
     ]);
     const listener = (message: RuntimeMessage) => {
-      if (message.type === 'OPEN_OVERSEAS_WORKSPACE') setView('overseas');
       if (message.type === 'SCAN_STATE_CHANGED') void refreshState();
       if (
         message.type === 'AI_MESSAGE_DELTA'
@@ -2092,9 +1995,9 @@ export function App() {
   };
 
   useEffect(() => {
-    if (!activeStateLoaded || view !== 'overseas') return;
+    if (!activeStateLoaded) return;
     if (scanState.status === 'idle') void startScan();
-  }, [activeStateLoaded, view, scanState.status]);
+  }, [activeStateLoaded, scanState.status]);
 
   const grantPageAccess = async () => {
     setError('');
@@ -2285,6 +2188,7 @@ export function App() {
       return (
         <RecommendationsView
           report={report}
+          selectedRecommendationId={selectedRecommendationId}
           onLocate={locateFinding}
           onOpenIssue={(finding) => {
             setSelectedIssueId(finding.id);
@@ -2293,7 +2197,10 @@ export function App() {
         />
       );
     }
-    if (view === 'issues') return <IssuesView report={report} onLocate={locateFinding} initialExpandedId={selectedIssueId} />;
+    if (view === 'issues') return <IssuesView report={report} onLocate={locateFinding} initialExpandedId={selectedIssueId} onOpenRecommendation={(finding) => {
+      setSelectedRecommendationId(finding.rootCauseId || finding.ruleId);
+      setView('recommendations');
+    }} />;
     if (view === 'ai') {
       return (
         <AiChatView

@@ -12,6 +12,13 @@ export function isExplicitlyUnsupportedUrl(url: string | undefined): boolean {
   return !/^https?:\/\//i.test(url) || /^https?:\/\/chromewebstore\.google\.com\//i.test(url);
 }
 
+export function pageStateMatchesUrl(state: import('./audit/types').ScanState, url: string | undefined): boolean {
+  if (!url) return state.status === 'idle';
+  if (state.status === 'ready') return state.report.url === url;
+  if (state.status === 'unsupported') return isExplicitlyUnsupportedUrl(url);
+  return true;
+}
+
 export function classifyPageAccessError(message: string): PageAccessFailure {
   if (
     /PDF 页面不支持|extensions gallery cannot be scripted|chromewebstore\.google\.com|(?:chrome|edge|about|devtools):\/\//i.test(

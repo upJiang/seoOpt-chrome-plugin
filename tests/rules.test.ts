@@ -54,10 +54,18 @@ describe('core audit rules', () => {
 
   it('uses FCP as the stable paint metric and excludes INP from page scoring', () => {
     const result = runRule('performance.fcp', healthySnapshot({
-      performance: { lcp: 1300, cls: 0.02, fcp: 3200, ttfb: 260 },
+      performance: { lcp: 1300, cls: 0.02, fcp: 3200, ttfb: 260, inp: null },
     }));
-    expect(result.status).toBe('failure');
+    expect(result.status).toBe('warning');
+    expect(result.priority).toBe('P2');
+    expect(result.includedInScore).toBe(false);
     expect(AUDIT_RULES.some((rule) => rule.id === 'performance.inp')).toBe(false);
+  });
+
+  it('infers page type from URL, content responsibility, and interactive task evidence', () => {
+    expect(inferAuditContext(healthySnapshot({ url: 'https://example.com/', templateType: 'home' })).pageType).toBe('home');
+    expect(inferAuditContext(healthySnapshot({ url: 'https://example.com/search?q=seo', templateType: 'search', jsonLd: [] })).pageType).toBe('search_filter');
+    expect(inferAuditContext(healthySnapshot({ url: 'https://example.com/tool', templateType: 'other', jsonLd: [], headings: [{ level: 1, text: '免费检测网站', locator: { segments: ['h1'] } }], ctaTexts: ['开始检测'], formCount: 1 })).pageType).toBe('tool');
   });
 
   it('infers article and category contexts without scan settings', () => {

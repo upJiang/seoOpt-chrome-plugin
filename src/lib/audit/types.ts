@@ -20,7 +20,7 @@ import type { EvidenceConfidence, EvidenceSource, SchemaValidationResult, SiteIn
 import type { SearchProject, SemDiagnosticReport, SiteAuditRun, OverseasStaticSnapshot, TrackingObservation, TrackingTestRun, InternationalProjectSettings, TrackingReconciliationReport } from '../projects/types';
 
 export type ExpectedIndexState = 'unknown' | 'index' | 'noindex';
-export type PageType = 'auto' | 'article' | 'product_service' | 'category' | 'internal_app';
+export type PageType = 'auto' | 'home' | 'article' | 'product_service' | 'category' | 'tool' | 'search_filter' | 'internal_app';
 export type FindingScope = 'page' | 'site_sample' | 'search_performance';
 
 export interface ElementLocator {
@@ -116,6 +116,22 @@ export interface PerformanceSnapshot {
   cls: number | null;
   fcp: number | null;
   ttfb: number | null;
+  inp: number | null;
+  observedForMs?: number;
+}
+
+export type TechnologyStack = 'wordpress' | 'shopify' | 'nextjs' | 'nuxt' | 'vue' | 'react' | 'static_html' | 'nginx' | 'apache' | 'cloudflare' | 'vercel' | 'unknown';
+
+export interface TechnologySignal {
+  stack: TechnologyStack;
+  confidence: EvidenceConfidence;
+  evidence: string;
+}
+
+export interface TechnologySnapshot {
+  primary: TechnologyStack;
+  confidence: EvidenceConfidence;
+  signals: TechnologySignal[];
 }
 
 export type TechnicalSignalStatus = 'good' | 'attention' | 'confirm' | 'unavailable';
@@ -130,6 +146,10 @@ export interface ResponseHeaderSnapshot {
   vary: string | null;
   age: string | null;
   strictTransportSecurity: string | null;
+  server?: string | null;
+  poweredBy?: string | null;
+  via?: string | null;
+  cfRay?: string | null;
 }
 
 export interface RedirectHop {
@@ -302,6 +322,11 @@ export interface PageSnapshot {
   robotsMeta: string[];
   canonicals: string[];
   hreflangs: HreflangSnapshot[];
+  alternatePages?: Array<{
+    kind: 'mobile';
+    href: string;
+    media: string;
+  }>;
   htmlLang: string;
   headings: HeadingSnapshot[];
   mainCount: number;
@@ -327,6 +352,7 @@ export interface PageSnapshot {
   titlePattern?: string;
   technical?: TechnicalDeliveryProbe;
   overseas?: OverseasStaticSnapshot;
+  technology?: TechnologySnapshot;
 }
 
 export interface AuditFinding {
@@ -338,6 +364,7 @@ export interface AuditFinding {
   priority: AuditPriority;
   points: number;
   scoreRatio: number | null;
+  includedInScore?: boolean;
   scoreCap?: number;
   evidence: string;
   impact: string;
@@ -411,6 +438,7 @@ export interface AiContextFinding {
   priority: AuditPriority;
   title: string;
   points: number;
+  includedInScore: boolean;
   evidence: string;
   impact: string;
   explanation: string;
@@ -456,6 +484,33 @@ export interface AiContextBundle {
     categories: Array<{ label: string; score: number | null; issueCount: number }>;
   };
   findings: AiContextFinding[];
+  recommendations: Array<{
+    rootCauseId: string;
+    title: string;
+    priority: AuditPriority;
+    confidence: EvidenceConfidence;
+    scope: FindingScope;
+    affectedUrlCount: number;
+    conclusion: string;
+    seoMechanism: string;
+    currentImpact: string;
+    strategy: string;
+    modificationLayer: string;
+    expectedDirectResult: string;
+    possibleSearchEffect: string;
+    notGuaranteed: string;
+    implementations: Array<{
+      technology: string;
+      location: string;
+      code: string | null;
+      placeholders: Array<{ token: string; meaning: string }>;
+      explanations: Array<{ code: string; explanation: string }>;
+      verification: string[];
+      rollback: string;
+    }>;
+    pitfalls: string[];
+    limitations: string[];
+  }>;
   links: {
     total: number;
     internal: number;
@@ -512,15 +567,24 @@ export interface AiContextBundle {
     }>;
     consent: import('../projects/types').ConsentSignalSnapshot;
     clickParameters: Array<{ name: string; present: boolean; preservedAfterRedirect: boolean | null }>;
+    otherAnalytics: Array<{ platform: string; label: string; requestObserved: boolean }>;
     findings: Array<{
+      id: string;
+      kind: import('../projects/types').OverseasFindingKind;
+      category: import('../projects/types').OverseasDiagnosticFinding['category'];
       priority: AuditPriority;
       title: string;
       confidence: import('../projects/types').EvidenceConfidence;
       evidence: string;
+      applicability: string;
       action: string;
+      directResult: string;
+      possibleEffect: string;
+      notGuaranteed: string;
       verification: string;
       limitation: string;
     }>;
+    evidenceGaps: Array<{ id: string; title: string; confirmed: string; unavailable: string; limitation: string }>;
   };
   joint?: {
     project: {
@@ -681,7 +745,6 @@ export type ScanState =
 
 export type RuntimeMessage =
   | { type: 'START_SCAN'; context?: AuditContext; url?: string }
-  | { type: 'OPEN_OVERSEAS_WORKSPACE'; tabId: number }
   | { type: 'UPDATE_REPORT_CONTEXT'; report: AuditReport; context: AuditContext }
   | { type: 'GET_ACTIVE_STATE' }
   | { type: 'SCAN_STATE_CHANGED'; tabId: number }

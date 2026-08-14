@@ -28,6 +28,36 @@ describe('calculateScores', () => {
     expect(result.scoreLabel).toBe('待优化');
   });
 
+  it('does not count zero-point technical signals as score coverage', () => {
+    const result = calculateScores([
+      finding({ id: 'measured', points: 10, status: 'pass', scoreRatio: 1 }),
+      finding({ id: 'missing', points: 10, status: 'not_measurable', scoreRatio: null }),
+      finding({ id: 'technical', points: 0, status: 'pass', scoreRatio: 1 }),
+    ]);
+
+    expect(result.coverage).toBe(50);
+    expect(result.measuredChecks).toBe(1);
+    expect(result.measurableChecks).toBe(2);
+  });
+
+  it('excludes single-session performance candidates from the SEO score and coverage', () => {
+    const result = calculateScores([
+      finding({ id: 'seo', points: 10, status: 'pass', scoreRatio: 1 }),
+      finding({ id: 'lab-metric', category: 'performance', points: 3, status: 'warning', scoreRatio: 0.5, includedInScore: false }),
+    ]);
+    expect(result.overallScore).toBe(100);
+    expect(result.coverage).toBe(100);
+  });
+
+  it('only applies score caps backed by high-confidence evidence', () => {
+    const result = calculateScores([
+      finding({ id: 'pass', points: 95 }),
+      finding({ id: 'candidate', category: 'discoverability', points: 5, status: 'failure', scoreRatio: 0, priority: 'P0', scoreCap: 39, confidence: 'medium' }),
+    ]);
+
+    expect(result.overallScore).toBe(95);
+  });
+
   it('caps P0 indexing blockers at 39', () => {
     const result = calculateScores([
       finding({ id: 'pass', points: 95 }),

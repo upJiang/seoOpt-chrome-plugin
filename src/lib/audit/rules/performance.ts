@@ -26,14 +26,15 @@ function metricRule(options: {
           recommendation: '积累真实用户数据，并在可复现环境重新测试。',
           verification: '结合实验室瀑布和真实用户分位数。',
           owner: '开发',
+          includedInScore: false,
         };
       }
       const formatted = options.key === 'cls' ? value.toFixed(3) : Math.round(value).toString();
       if (value > options.poor) {
         return {
-          status: 'failure',
-          priority: 'P1',
-          evidence: `本次会话 ${options.title} 为 ${formatted}${options.unit}。`,
+          status: 'warning',
+          priority: 'P2',
+          evidence: `本次访问样本 ${options.title} 为 ${formatted}${options.unit}。`,
           impact: '当前访问存在明显体验风险。',
           explanation: '这是本次浏览会话信号，不等同于真实用户字段结论。',
           recommendation: options.recommendation,
@@ -41,13 +42,16 @@ function metricRule(options: {
           observationPeriod: '实验室可立即复测；真实用户数据至少观察一个完整数据周期。',
           effort: '中',
           owner: '开发',
+          confidence: 'medium',
+          scoreRatio: 0.5,
+          includedInScore: false,
         };
       }
       if (value > options.good) {
         return {
           status: 'warning',
           priority: 'P2',
-          evidence: `本次会话 ${options.title} 为 ${formatted}${options.unit}。`,
+          evidence: `本次访问样本 ${options.title} 为 ${formatted}${options.unit}。`,
           impact: '体验处于需要改进区间。',
           explanation: '单次会话只能定位线索，不能替代字段数据。',
           recommendation: options.recommendation,
@@ -55,17 +59,21 @@ function metricRule(options: {
           observationPeriod: '实验室立即复测，字段数据按平台更新周期观察。',
           effort: '中',
           owner: '开发',
+          confidence: 'medium',
+          includedInScore: false,
         };
       }
       return {
         status: 'pass',
-        evidence: `本次会话 ${options.title} 为 ${formatted}${options.unit}。`,
+        evidence: `本次访问样本 ${options.title} 为 ${formatted}${options.unit}。`,
         impact: '当前样本处于良好区间。',
         explanation: '单次良好结果仍不能证明所有真实用户都良好。',
         recommendation: '继续用真实用户 75 分位和低端设备监控。',
         verification: '对主要模板分别建立字段监控。',
         observationPeriod: '持续观察真实用户数据。',
         owner: '开发',
+        confidence: 'medium',
+        includedInScore: false,
       };
     },
   };

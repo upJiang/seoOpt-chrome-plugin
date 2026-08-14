@@ -37,13 +37,15 @@ import {
   saveOverseasReport,
   saveTrackingRun,
 } from '../src/lib/projects/db';
-import type { InternationalProjectSettings, TrackingObservation, TrackingTestRun } from '../src/lib/projects/types';
+import type { InternationalProjectSettings, OverseasStaticSnapshot, TrackingObservation, TrackingTestRun } from '../src/lib/projects/types';
 import { finalizeTrackingRun, reconcileTrackingData, validateTrackingObservation } from '../src/lib/overseas/diagnostics';
 import { installTrackingObserver, stopTrackingObserver } from '../src/lib/overseas/observer-main';
-import { baselineFromReport, tasksFromFindings, tasksFromSiteIssues } from '../src/lib/remediation/tasks';
+import { baselineFromReport } from '../src/lib/remediation/tasks';
 import {
   classifyPageAccessError,
   isExplicitlyUnsupportedUrl,
+  originPermissionPattern,
+  pageStateMatchesUrl,
   PAGE_PERMISSION_MESSAGE,
   UNSUPPORTED_PAGE_MESSAGE,
 } from '../src/lib/page-access';
@@ -132,6 +134,84 @@ async function fetchWithProbeTimeout(url: string, redirect: RequestRedirect): Pr
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function checkInternationalRelatedPages(snapshot: PageSnapshot): Promise<OverseasStaticSnapshot | null> {
+  if (!snapshot.overseas) return null;
+  const { parseHreflangTargetHtml } = await import('../src/lib/overseas/hreflang-parser');
+  const currentUrl = snapshot.url;
+  const currentOrigin = new URL(currentUrl).origin;
+  const candidates = [
+    ...snapshot.hreflangs.filter((item) => item.valid).map((item) => ({ kind: 'language' as const, lang: item.lang, href: item.href })),
+    ...(snapshot.alternatePages ?? []).filter((item) => item.kind === 'mobile').map((item) => ({ kind: 'mobile' as const, lang: '移动版', href: item.href })),
+  ];
+  const targets = [...new Map(candidates.flatMap((target) => {
+    try {
+      const url = new URL(target.href, currentUrl).href;
+      return [[url, { ...target, href: url }] as const];
+    } catch {
+      return [];
+    }
+  })).values()].slice(0, 20);
+  const checkable: typeof targets = [];
+  const skippedOrigins = new Set<string>();
+  for (const target of targets) {
+    const origin = new URL(target.href).origin;
+    const allowed = origin === currentOrigin || await chrome.permissions.contains({ origins: [originPermissionPattern(origin)] });
+    if (allowed) checkable.push(target);
+    else skippedOrigins.add(origin);
+  }
+  const checkedTargets = await Promise.all(checkable.map(async (target) => {
+    try {
+      const response = await fetchWithProbeTimeout(target.href, 'follow');
+      const html = (await response.text()).slice(0, 2_000_000);
+      const parsed = parseHreflangTargetHtml(html, response.url || target.href, currentUrl);
+      const typeLabel = target.kind === 'mobile' ? '移动版本' : '语言页';
+      const issue = !response.ok
+        ? `${typeLabel}返回 ${response.status}`
+        : parsed.noindex
+          ? `${typeLabel}设置了 noindex`
+          : !parsed.htmlLang
+            ? `${typeLabel}缺少 html lang`
+            : target.kind === 'language' && !parsed.reciprocal
+              ? '没有观察到返回当前页的 hreflang'
+              : !parsed.canonical
+                ? `${typeLabel}缺少 Canonical`
+                : null;
+      return { kind: target.kind, lang: target.lang, url: target.href, status: response.status, finalUrl: response.url, reciprocal: target.kind === 'language' ? parsed.reciprocal : null, canonical: parsed.canonical, noindex: parsed.noindex, htmlLang: parsed.htmlLang, issue };
+    } catch (error) {
+      return { kind: target.kind, lang: target.lang, url: target.href, status: null, finalUrl: '', reciprocal: null, canonical: '', noindex: false, htmlLang: '', issue: error instanceof Error ? error.message : '关联版本检查失败' };
+    }
+  }));
+  const languageTargets = targets.filter((target) => target.kind === 'language');
+  const sitemapUrl = snapshot.siteProbe.sitemap?.url;
+  let sitemapConsistency: 'matched' | 'partial' | 'unavailable' = 'unavailable';
+  if (sitemapUrl && languageTargets.length) {
+    try {
+      const response = await fetchWithProbeTimeout(sitemapUrl, 'follow');
+      const xml = (await response.text()).slice(0, 2_000_000);
+      const normalize = (value: string) => { try { const url = new URL(value); url.hash = ''; return url.href.replace(/\/$/, ''); } catch { return value; } };
+      const present = languageTargets.filter((target) => xml.includes(normalize(target.href))).length;
+      sitemapConsistency = present === languageTargets.length ? 'matched' : 'partial';
+    } catch {
+      sitemapConsistency = 'unavailable';
+    }
+  }
+  const checkedAt = new Date().toISOString();
+  return {
+    ...snapshot.overseas,
+    internationalSeo: {
+      ...snapshot.overseas.internationalSeo,
+      targets: checkedTargets,
+      sitemapConsistency,
+      relatedCheck: {
+        checkedAt,
+        checkedUrls: checkable.map((target) => target.href),
+        skippedOrigins: [...skippedOrigins],
+        status: targets.length === 0 ? 'not_applicable' : skippedOrigins.size ? 'partial' : 'complete',
+      },
+    },
+  };
 }
 
 async function probeRedirectVariant(requestedUrl: string): Promise<RedirectVariantResult> {
@@ -296,14 +376,8 @@ async function mutateTrackingRun<T>(
 }
 
 async function persistReportWork(projectId: string, report: import('../src/lib/audit/types').AuditReport): Promise<void> {
-  const [existing, baselines] = await Promise.all([listRemediationTasks(projectId), listAuditBaselines(projectId)]);
-  const tasks = tasksFromFindings(projectId, report.findings, existing);
-  await Promise.all(tasks.map((task) => saveRemediationTask(task)));
-  const activeRoots = new Set(tasks.map((task) => task.rootCauseId));
+  const baselines = await listAuditBaselines(projectId);
   const now = new Date().toISOString();
-  await Promise.all(existing
-    .filter((task) => task.status === 'ready_for_retest' && !activeRoots.has(task.rootCauseId))
-    .map((task) => saveRemediationTask({ ...task, status: 'verified', updatedAt: now, lastVerifiedAt: now })));
   if (!baselines.some((baseline) => baseline.reportId === report.id)) {
     const baseline = baselineFromReport(projectId, report);
     await saveAuditBaseline(baseline);
@@ -373,6 +447,7 @@ async function scanTab(tab: chrome.tabs.Tab, context?: AuditContext): Promise<Sc
     try {
       const project = await getProjectByOrigin(snapshot.origin);
       snapshot.overseas = await collectOverseasForTab(tab.id, snapshot, project?.international ?? DEFAULT_INTERNATIONAL_SETTINGS);
+      snapshot.overseas = await checkInternationalRelatedPages(snapshot) ?? snapshot.overseas;
     } catch {
       // Overseas evidence is supplementary and must never block the core page scan.
     }
@@ -420,12 +495,6 @@ export default defineBackground(() => {
         startedAt: new Date().toISOString(),
       });
       await openPanel;
-      await chrome.runtime.sendMessage({
-        type: 'OPEN_OVERSEAS_WORKSPACE',
-        tabId: tab.id!,
-      } satisfies RuntimeMessage).catch(() => {
-        // A newly created side panel already defaults to the overseas workspace.
-      });
       await scanTab(tab);
     })().catch(async (error: unknown) => {
         await saveState(tab.id!, {
@@ -441,7 +510,13 @@ export default defineBackground(() => {
       if (message.type === 'GET_ACTIVE_STATE') {
         const tab = await activeTab();
         if (!tab?.id) return { status: 'idle', tabId: null } satisfies ScanState;
-        return getScanState(tab.id);
+        const state = await getScanState(tab.id);
+        if (!pageStateMatchesUrl(state, tab.url)) {
+          const idle = { status: 'idle', tabId: tab.id } satisfies ScanState;
+          await saveState(tab.id, idle);
+          return idle;
+        }
+        return state;
       }
       if (message.type === 'START_SCAN') {
         const tab = await activeTab();
@@ -598,9 +673,6 @@ export default defineBackground(() => {
             onBatch: async (run, pages) => {
               await Promise.all([saveSiteRun(run), saveSitePages(pages)]);
               if (run.status === 'completed' || run.status === 'paused' || run.status === 'failed') {
-                const existingTasks = await listRemediationTasks(message.project.id);
-                const tasks = tasksFromSiteIssues(message.project.id, run.issues, existingTasks);
-                await Promise.all(tasks.map((task) => saveRemediationTask(task)));
                 if (run.status === 'completed') await saveChangeRecord({
                   id: crypto.randomUUID(),
                   projectId: message.project.id,
@@ -662,31 +734,13 @@ export default defineBackground(() => {
         return collectOverseasForTab(tab.id, message.report.snapshot, message.settings);
       }
       if (message.type === 'CHECK_HREFLANG_TARGETS') {
-        const { parseHreflangTargetHtml } = await import('../src/lib/overseas/hreflang-parser');
-        const targets = message.report.snapshot.hreflangs.filter((item) => item.valid).slice(0, 20);
-        const currentUrl = message.report.url;
-        const checkedTargets = await Promise.all(targets.map(async (target) => {
-          try {
-            const response = await fetchWithProbeTimeout(new URL(target.href, currentUrl).href, 'follow');
-            const html = (await response.text()).slice(0, 2_000_000);
-            const parsed = parseHreflangTargetHtml(html, response.url || target.href, currentUrl);
-            return { lang: target.lang, url: target.href, status: response.status, finalUrl: response.url, reciprocal: parsed.reciprocal, canonical: parsed.canonical, noindex: parsed.noindex, htmlLang: parsed.htmlLang, issue: !response.ok ? `语言页返回 ${response.status}` : parsed.noindex ? '语言页设置了 noindex' : parsed.reciprocal ? null : '没有观察到返回当前页的 hreflang' };
-          } catch (error) {
-            return { lang: target.lang, url: target.href, status: null, finalUrl: '', reciprocal: null, canonical: '', noindex: false, htmlLang: '', issue: error instanceof Error ? error.message : '语言页检查失败' };
-          }
-        }));
-        const sitemapUrl = message.report.snapshot.siteProbe.sitemap?.url;
-        let sitemapConsistency: 'matched' | 'partial' | 'unavailable' = 'unavailable';
-        if (sitemapUrl && targets.length) {
-          try {
-            const response = await fetchWithProbeTimeout(sitemapUrl, 'follow');
-            const xml = (await response.text()).slice(0, 2_000_000);
-            const normalized = (value: string) => { try { const url = new URL(value); url.hash = ''; return url.href.replace(/\/$/, ''); } catch { return value; } };
-            const present = targets.filter((target) => xml.includes(normalized(new URL(target.href, message.report.url).href))).length;
-            sitemapConsistency = present === targets.length ? 'matched' : 'partial';
-          } catch { sitemapConsistency = 'unavailable'; }
-        }
-        return { targets: checkedTargets, sitemapConsistency };
+        const overseas = await checkInternationalRelatedPages(message.report.snapshot);
+        if (!overseas) throw new Error('当前报告没有海外页面证据，请重新扫描。');
+        const state = await getScanState(message.report.tabId);
+        const baseReport = state.status === 'ready' && state.report.id === message.report.id ? state.report : message.report;
+        const nextReport = { ...baseReport, snapshot: { ...baseReport.snapshot, overseas } };
+        await saveState(message.report.tabId, { status: 'ready', tabId: message.report.tabId, report: nextReport });
+        return overseas;
       }
       if (message.type === 'START_TRACKING_TEST') {
         const project = await getProject(message.projectId);
@@ -793,16 +847,31 @@ export default defineBackground(() => {
     return true;
   });
 
-  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, updatedTab) => {
     if (changeInfo.status === 'loading') {
       void getScanState(tabId).then(async (state) => {
-        if (state.status !== 'ready') return;
-        await saveState(tabId, { ...state, report: { ...state.report, stale: true } });
+        if (state.status === 'ready') {
+          await saveState(tabId, { ...state, report: { ...state.report, stale: true } });
+          return;
+        }
+        if (state.status === 'unsupported' || state.status === 'error' || state.status === 'permission_required') {
+          await saveState(tabId, { status: 'idle', tabId });
+        }
       });
       return;
     }
     if (changeInfo.status === 'complete') {
       void (async () => {
+        const tab = updatedTab.url ? updatedTab : await chrome.tabs.get(tabId);
+        if (tab.url && !isExplicitlyUnsupportedUrl(tab.url)) {
+          const currentState = await getScanState(tabId);
+          const persistentAccess = await chrome.permissions.contains({ origins: [originPermissionPattern(tab.url)] });
+          if (persistentAccess && (currentState.status !== 'ready' || currentState.report.url !== tab.url || currentState.report.stale)) {
+            await scanTab(tab, currentState.status === 'ready' && currentState.report.url === tab.url ? currentState.report.context : undefined);
+          } else if (!pageStateMatchesUrl(currentState, tab.url)) {
+            await saveState(tabId, { status: 'idle', tabId });
+          }
+        }
         const persistedRuns = await listRunningTrackingRunsForTab(tabId);
         const runs = [...new Map([
           ...persistedRuns,
@@ -810,8 +879,8 @@ export default defineBackground(() => {
         ].map((run) => [run.id, run])).values()];
         for (const run of runs) {
           const project = await getProject(run.projectId);
-          const tab = await chrome.tabs.get(tabId);
-          if (!project || !tab.url) continue;
+          const trackingTab = await chrome.tabs.get(tabId);
+          if (!project || !trackingTab.url) continue;
           if (Date.now() - Date.parse(run.startedAt) >= 600_000) {
             const expired = finalizeTrackingRun({ ...run, status: 'expired' });
             activeTrackingRuns.delete(run.id);
@@ -822,7 +891,7 @@ export default defineBackground(() => {
           activeTrackingRuns.set(run.id, run);
           let allowed = false;
           try {
-            const origin = new URL(tab.url).origin;
+            const origin = new URL(trackingTab.url).origin;
             allowed = origin === project.origin || (project.international?.conversionDomains ?? []).some((domain) => {
               try { return new URL(/^https?:\/\//i.test(domain) ? domain : `https://${domain}`).origin === origin; } catch { return false; }
             });

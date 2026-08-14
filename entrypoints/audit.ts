@@ -12,6 +12,7 @@ import type {
   SitemapProbe,
   SiteProbeResult,
   TechnicalDeliveryProbe,
+  TechnologySnapshot,
   VideoSnapshot,
 } from '../src/lib/audit/types';
 import { parseRobotsPolicy } from '../src/lib/audit/robots';
@@ -61,6 +62,11 @@ function notifyPageStale(): void {
 interface LayoutShiftEntry extends PerformanceEntry {
   value: number;
   hadRecentInput: boolean;
+}
+
+interface EventTimingEntry extends PerformanceEntry {
+  duration: number;
+  interactionId: number;
 }
 
 function roots(): Array<Document | ShadowRoot> {
@@ -285,6 +291,19 @@ function collectHreflangs(): HreflangSnapshot[] {
       locator: locatorFor(link),
     };
   });
+}
+
+function collectMobileAlternates(): NonNullable<PageSnapshot['alternatePages']> {
+  return deepQueryAll<HTMLLinkElement>('link[rel~="alternate"][href][media]:not([hreflang])')
+    .filter((link) => /(?:max-width|handheld|mobile)/i.test(link.media))
+    .flatMap((link) => {
+      try {
+        return [{ kind: 'mobile' as const, href: new URL(link.href, location.href).href, media: link.media.trim() }];
+      } catch {
+        return [];
+      }
+    })
+    .slice(0, 20);
 }
 
 function resourceKind(initiatorType: string, url: string): ResourceSnapshot['kind'] {
@@ -616,6 +635,7 @@ async function probeSite(url: string, resourceUrls: string[]): Promise<{
 async function collectPerformance(): Promise<PerformanceSnapshot> {
   let lcp: number | null = null;
   let cls: number | null = PerformanceObserver.supportedEntryTypes.includes('layout-shift') ? 0 : null;
+  let inp: number | null = null;
   const observers: PerformanceObserver[] = [];
 
   const observe = (type: string, callback: (entries: PerformanceEntryList) => void) => {
@@ -638,7 +658,16 @@ async function collectPerformance(): Promise<PerformanceSnapshot> {
       return total + (shift.hadRecentInput ? 0 : shift.value);
     }, cls ?? 0);
   });
-  await new Promise((resolve) => setTimeout(resolve, 160));
+  observe('event', (entries) => {
+    const interactionDurations = entries
+      .map((entry) => entry as EventTimingEntry)
+      .filter((entry) => entry.interactionId > 0)
+      .map((entry) => entry.duration);
+    if (interactionDurations.length) inp = Math.max(inp ?? 0, ...interactionDurations);
+  });
+  const observationStartedAt = performance.now();
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  const observedForMs = Math.round(performance.now() - observationStartedAt);
   observers.forEach((observer) => observer.disconnect());
   const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
   const firstContentfulPaint = performance.getEntriesByName('first-contentful-paint')[0];
@@ -648,7 +677,35 @@ async function collectPerformance(): Promise<PerformanceSnapshot> {
     cls,
     fcp: firstContentfulPaint?.startTime ?? null,
     ttfb: navigation ? Math.max(0, navigation.responseStart - navigation.requestStart) : null,
+    inp,
+    observedForMs,
   };
+}
+
+function detectTechnology(headers: import('../src/lib/audit/types').ResponseHeaderSnapshot): TechnologySnapshot {
+  const signals: TechnologySnapshot['signals'] = [];
+  const add = (stack: TechnologySnapshot['primary'], confidence: TechnologySnapshot['confidence'], evidence: string) => {
+    if (!signals.some((signal) => signal.stack === stack && signal.evidence === evidence)) signals.push({ stack, confidence, evidence });
+  };
+  const generator = document.querySelector<HTMLMetaElement>('meta[name="generator" i]')?.content || '';
+  const html = document.documentElement.innerHTML.slice(0, 500_000);
+  const scripts = Array.from(document.scripts).map((script) => script.src).join('\n');
+  if (/wordpress/i.test(generator) || /\/wp-(?:content|includes)\//i.test(html)) add('wordpress', 'high', '页面生成器或资源路径包含 WordPress 特征。');
+  if (/shopify/i.test(generator) || /cdn\.shopify\.com|Shopify\.theme/i.test(html)) add('shopify', 'high', '页面脚本或资源包含 Shopify 特征。');
+  if (document.getElementById('__next') || /\/_next\//.test(scripts)) add('nextjs', 'high', '检测到 __next 容器或 /_next/ 资源。');
+  if (document.getElementById('__nuxt') || /\/_nuxt\//.test(scripts)) add('nuxt', 'high', '检测到 __nuxt 容器或 /_nuxt/ 资源。');
+  if (/data-v-app|__VUE__|vue(?:\.runtime)?(?:\.global)?\.js/i.test(html)) add('vue', 'medium', '检测到 Vue 运行时或挂载特征。');
+  if (document.querySelector('[data-reactroot], [data-react-checksum]') || /react(?:-dom)?(?:\.production)?(?:\.min)?\.js/i.test(scripts)) add('react', 'medium', '检测到 React 挂载或运行时特征。');
+  const delivery = [headers.server, headers.poweredBy, headers.via].filter(Boolean).join(' ');
+  if (/nginx/i.test(delivery)) add('nginx', 'high', `响应头显示服务器为 ${delivery.slice(0, 120)}。`);
+  if (/apache/i.test(delivery)) add('apache', 'high', `响应头显示服务器为 ${delivery.slice(0, 120)}。`);
+  if (headers.cfRay || /cloudflare/i.test(delivery)) add('cloudflare', 'high', '响应头包含 Cloudflare 交付特征。');
+  if (/vercel/i.test(delivery) || document.querySelector('script[src*="vercel"]')) add('vercel', 'medium', '检测到 Vercel 交付特征。');
+  if (!signals.some((signal) => ['wordpress', 'shopify', 'nextjs', 'nuxt', 'vue', 'react'].includes(signal.stack))) {
+    add('static_html', 'low', '没有识别到可靠框架特征；仅能以最终 HTML 作为通用实现目标。');
+  }
+  const primary = signals.find((signal) => ['wordpress', 'shopify', 'nextjs', 'nuxt', 'vue', 'react'].includes(signal.stack)) ?? signals[0];
+  return { primary: primary?.stack ?? 'unknown', confidence: primary?.confidence ?? 'low', signals };
 }
 
 async function collectPage(): Promise<PageSnapshot> {
@@ -689,6 +746,7 @@ async function collectPage(): Promise<PageSnapshot> {
     robotsMeta,
     canonicals,
     hreflangs: collectHreflangs(),
+    alternatePages: collectMobileAlternates(),
     htmlLang: document.documentElement.lang,
     headings,
     mainCount: deepQueryAll('main,[role="main"]').length,
@@ -716,6 +774,7 @@ async function collectPage(): Promise<PageSnapshot> {
     schemaValidation: jsonLd.flatMap((item) => item.schema ? [item.schema] : []),
     templateType: classifiedTemplate.type,
     titlePattern: classifiedTemplate.pattern,
+    technology: detectTechnology(siteProbe.page.headers || EMPTY_RESPONSE_HEADERS),
   };
   snapshot.technical = buildTechnicalDelivery(snapshot, collectedResources);
   return snapshot;

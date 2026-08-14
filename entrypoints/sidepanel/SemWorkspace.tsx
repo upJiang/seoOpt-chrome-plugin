@@ -1,5 +1,5 @@
-import { AlertCircle, BarChart3, CalendarClock, Check, Circle, FileSpreadsheet, Gauge, Megaphone, MousePointerClick, Plus, Search, Settings2, Trash2 } from 'lucide-react';
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertCircle, BarChart3, CalendarClock, Check, FileSpreadsheet, Gauge, LoaderCircle, Megaphone, MousePointerClick, Plus, Search, Settings2, Trash2 } from 'lucide-react';
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   createProjectForOrigin,
@@ -103,7 +103,9 @@ export function SemWorkspace({ report }: { report: AuditReport | null }) {
   const [learningDays, setLearningDays] = useState('7');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [diagnosisRunning, setDiagnosisRunning] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const projectsRef = useRef<SearchProject[]>([]);
   const project = projects.find((item) => item.id === projectId) ?? null;
 
   const refresh = useCallback(async (preferredId?: string) => {
@@ -112,8 +114,13 @@ export function SemWorkspace({ report }: { report: AuditReport | null }) {
       await createProjectForOrigin(new URL(report.url).origin);
       next = await listProjects();
     }
+    projectsRef.current = next;
     setProjects(next);
-    const nextId = preferredId || projectId || next[0]?.id || '';
+    const preferredExists = preferredId ? next.some((item) => item.id === preferredId) : false;
+    const currentExists = next.some((item) => item.id === projectId);
+    const nextId = preferredId !== undefined
+      ? (preferredExists ? preferredId : next[0]?.id || '')
+      : (currentExists ? projectId : next[0]?.id || '');
     setProjectId(nextId);
     if (nextId) {
       const [nextDatasets, nextDiagnosis, nextChanges] = await Promise.all([listDatasets(nextId), latestSemReport(nextId), listChangeRecords(nextId)]);
@@ -139,24 +146,41 @@ export function SemWorkspace({ report }: { report: AuditReport | null }) {
   };
 
   const updateProject = async (patch: Partial<SearchProject>) => {
-    if (!project) return;
-    const next = { ...project, ...patch, updatedAt: new Date().toISOString() };
-    await saveProject(next);
-    setProjects((current) => current.map((item) => item.id === next.id ? next : item));
+    const currentProject = projectsRef.current.find((item) => item.id === projectId);
+    if (!currentProject) return;
+    const next = { ...currentProject, ...patch, updatedAt: new Date().toISOString() };
+    const nextProjects = projectsRef.current.map((item) => item.id === next.id ? next : item);
+    projectsRef.current = nextProjects;
+    setProjects(nextProjects);
+    try {
+      await saveProject(next);
+    } catch (cause) {
+      setError(cause instanceof Error ? `设置保存失败：${cause.message}` : '设置保存失败，请重试。');
+    }
   };
 
   const runDiagnosis = async () => {
-    if (!project) return;
-    const [performance, business, creatives, changes] = await Promise.all([
-      getProjectRows<SemPerformanceRow>('sem_performance', project.id),
-      getProjectRows<BusinessOutcomeRow>('business_outcome', project.id),
-      getProjectRows<SemCreativeRow>('sem_creative', project.id),
-      listChangeRecords(project.id),
-    ]);
-    const result = diagnoseSem(project, performance, business, creatives, changes);
-    await saveSemReport(result);
-    setDiagnosis(result);
-    setSection('diagnosis');
+    if (!project || diagnosisRunning) return;
+    setDiagnosisRunning(true);
+    setError('');
+    setNotice('');
+    try {
+      const [performance, business, creatives, changes] = await Promise.all([
+        getProjectRows<SemPerformanceRow>('sem_performance', project.id),
+        getProjectRows<BusinessOutcomeRow>('business_outcome', project.id),
+        getProjectRows<SemCreativeRow>('sem_creative', project.id),
+        listChangeRecords(project.id),
+      ]);
+      const result = diagnoseSem(project, performance, business, creatives, changes);
+      await saveSemReport(result);
+      setDiagnosis(result);
+      setSection('diagnosis');
+      setNotice('SEM 诊断已根据当前本地数据更新。');
+    } catch (cause) {
+      setError(cause instanceof Error ? `SEM 诊断失败：${cause.message}` : 'SEM 诊断失败，请重试。');
+    } finally {
+      setDiagnosisRunning(false);
+    }
   };
 
   const semTargetQuery = project?.sem.landingTargetQuery || report?.context.targetQuery || '';
@@ -165,11 +189,6 @@ export function SemWorkspace({ report }: { report: AuditReport | null }) {
   const handleDatasetImported = (dataset: ImportDataset) => {
     setDatasets((current) => [dataset, ...current.filter((item) => item.id !== dataset.id)]);
   };
-  const onboardingSteps = [
-    { label: '填写什么算有效、什么算划算', complete: Boolean(project?.primaryConversion && (project.sem.targetCpa !== null || project.sem.targetRoas !== null || project.sem.grossProfitPerConversion !== null)), action: () => document.getElementById('sem-basics')?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }) },
-    { label: '导入广告平台 CSV', complete: datasets.some((item) => item.kind === 'sem_performance'), action: () => setSection('data') },
-    { label: '查看问题和下一步', complete: Boolean(diagnosis), action: () => setSection(diagnosis ? 'diagnosis' : 'data') },
-  ];
   const recordSemChange = async () => {
     if (!project || !changeSummary.trim()) {
       setError('请先写清楚本次只改变了什么。');
@@ -259,10 +278,6 @@ export function SemWorkspace({ report }: { report: AuditReport | null }) {
             <div className="sticker-icon" aria-hidden="true"><Megaphone size={19} /></div>
             <div><h2 id="sem-what-is-title">这一页到底帮你判断什么？</h2><p>不是给广告账户打一个分，而是把“花了多少钱 → 带来哪些点击和转化 → 这些转化有没有业务价值”串起来。先导入广告表现，再按需补充业务结果，最后查看诊断。</p></div>
           </section>
-          <section className="sem-onboarding" aria-labelledby="sem-onboarding-title">
-            <div><p className="section-kicker">三步开始</p><h2 id="sem-onboarding-title">按顺序做，不容易迷路</h2><p>第一步告诉插件什么叫“有效”，第二步提供广告平台导出的数据，第三步才判断哪里值得复核。缺数据时只显示事实，不会假装给出调价结论。</p></div>
-            <ol>{onboardingSteps.map((step, index) => <li className={step.complete ? 'complete' : ''} key={step.label}><button type="button" onClick={step.action}><span>{step.complete ? <Check size={16} /> : <Circle size={16} />}</span><span>步骤 {index + 1}<span>{step.label}</span></span></button></li>)}</ol>
-          </section>
           <section className="sem-status-grid" aria-label="SEM 诊断状态">
             {([
               ['tracking', '数据能否信任'], ['searchTerms', '搜索词是否相关'], ['creativeLanding', '广告与页面是否一致'], ['conversionQuality', '转化是否有效'], ['commercialSustainability', '是否值得继续投放'],
@@ -272,11 +287,11 @@ export function SemWorkspace({ report }: { report: AuditReport | null }) {
             })}
           </section>
           <section id="sem-basics" className="plain-section project-settings">
-            <div className="section-heading"><div><p className="section-kicker">第 1 步</p><h2>先定义“有效”和“划算”</h2><p className="heading-help">至少填写一种真正想要的结果，再从 CPA、ROAS 或毛利中选一个你能确定的成本标准。输入后会自动保存在本机。</p></div></div>
+            <div className="section-heading"><div><p className="section-kicker">业务判断口径</p><h2>什么算有效，什么算划算</h2><p className="heading-help">这些信息用于区分平台转化和真实业务，并约束预算或出价建议；没有填写时只报告事实和风险。</p></div></div>
             <div className="project-form-grid sem-core-form">
               <SelectField label="业务类型" value={project.sem.businessType} onChange={(value) => void updateProject({ sem: { ...project.sem, businessType: value as SearchProject['sem']['businessType'] } })} options={[{ value: 'lead_generation', label: '服务获客' }, { value: 'ecommerce', label: '电商' }, { value: 'saas', label: 'SaaS' }, { value: 'content', label: '内容业务' }, { value: 'other', label: '其他' }]} />
               <label><span>真正想要的结果（核心转化）</span><small>例如：有效表单、已付款订单</small><input aria-label="核心转化" value={project.primaryConversion} placeholder="例如：有效表单" onChange={(event) => void updateProject({ primaryConversion: event.target.value })} /></label>
-              <label><span>报表使用的货币</span><small>例如：CNY、USD</small><input aria-label="货币" value={project.currency} maxLength={3} onChange={(event) => void updateProject({ currency: event.target.value.toUpperCase() })} /></label>
+              <label><span>报表使用的货币</span><small>例如：CNY、USD；不填写也可以先分析非金额问题</small><input aria-label="货币" value={project.currency === 'unknown' ? '' : project.currency} placeholder="例如：USD" maxLength={3} onChange={(event) => void updateProject({ currency: event.target.value.toUpperCase() || 'unknown' })} /></label>
             </div>
             <div className="sem-cost-boundary">
               <div><h3>什么情况才算划算？</h3><p>下面三项不必全部填写，选择你做生意时真正会用的一项即可。</p></div>
@@ -337,15 +352,15 @@ export function SemWorkspace({ report }: { report: AuditReport | null }) {
           <section className="plain-section"><div className="section-heading"><div><p className="section-kicker">本地数据</p><h2>已导入数据集</h2></div></div>
             {semDatasets.length ? <div className="dataset-list">{semDatasets.map((dataset) => <div className="dataset-row" key={dataset.id}><div><span>{dataset.name}</span><p>{dataset.kind} · {dataset.platform} · {dataset.rowCount.toLocaleString()} 行</p></div><button type="button" className="icon-button" aria-label={`删除 ${dataset.name}`} title={`删除 ${dataset.name}`} onClick={() => void deleteDataset(dataset).then(() => refresh(project.id))}><Trash2 size={17} /></button></div>)}</div> : <p className="empty-copy">还没有 SEM 数据。原始文件不会保存，只保留映射后的规范字段。</p>}
           </section>
-          <button type="button" className="primary-button sem-run" aria-label="运行 SEM 诊断" onClick={() => void runDiagnosis()}><Search size={17} />根据已导入数据生成诊断</button>
+          <button type="button" className="primary-button sem-run" aria-label="运行 SEM 诊断" disabled={diagnosisRunning} aria-busy={diagnosisRunning} onClick={() => void runDiagnosis()}>{diagnosisRunning ? <LoaderCircle className="spinner" size={17} /> : <Search size={17} />}{diagnosisRunning ? '正在生成诊断' : '根据已导入数据生成诊断'}</button>
         </div>
       ) : null}
       {project && section === 'diagnosis' ? (
         <div id="sem-panel-diagnosis" role="tabpanel" aria-labelledby="sem-tab-diagnosis" className="sem-section-panel">{!diagnosis ? <section className="sem-empty"><BarChart3 size={28} /><h3>还没有可分析的结果</h3><p>先到“数据”导入广告表现 CSV，再点击“根据已导入数据生成诊断”。</p><button type="button" className="primary-button" onClick={() => setSection('data')}>去导入数据</button></section> : <>
           <section className="sem-diagnosis-intro"><h2>先看事实，再决定动作</h2><p>这些指标不是广告平台的总评分。它们分别回答：点击是否划算、平台转化是否可信、真实业务是否赚钱。每个问题都包含证据、原因、建议和验证方法。</p></section>
           <section className="sem-metric-grid">{diagnosis.metrics.map((item) => <div className={`sem-metric status-${item.state}`} key={item.id}><span>{item.label}</span><p>{item.formattedValue}</p><small>{item.evidence}</small></div>)}</section>
-          <section className="plain-section"><div className="section-heading"><div><p className="section-kicker">固定诊断顺序</p><h2>问题与动作</h2></div></div>
-            <div className="sem-finding-list">{diagnosis.findings.map((item) => <article className={`sem-finding priority-${item.priority.toLocaleLowerCase()}`} key={item.id}><div className="sem-finding-title"><span>{item.priority}</span><h3>{item.title}</h3><small>{STAGE_LABELS[item.stage]} · {item.confidence === 'low' ? '低置信度' : item.confidence === 'medium' ? '中置信度' : '高置信度'}</small></div><p><span className="detail-label">证据</span>{item.evidence}</p><p><span className="detail-label">为什么</span>{item.why}</p><p><span className="detail-label">动作</span>{item.action}</p><p><span className="detail-label">验证</span>{item.verification}</p>{item.stopCandidate ? <div className="candidate-label">仅为复核/停止候选，不会自动添加否定词</div> : null}</article>)}</div>
+          <section className="plain-section"><div className="section-heading"><div><p className="section-kicker">完整优化策略</p><h2>问题、原因与广告策略</h2></div></div>
+            <div className="sem-finding-list">{diagnosis.findings.map((item) => <article className={`sem-finding priority-${item.priority.toLocaleLowerCase()}`} key={item.id}><div className="sem-finding-title"><span>{item.priority}</span><h3>{item.title}</h3><small>{STAGE_LABELS[item.stage]} · {item.confidence === 'low' ? '低置信度' : item.confidence === 'medium' ? '中置信度' : '高置信度'}</small></div><p><span className="detail-label">当前数据说明什么</span>{item.evidence}</p><p><span className="detail-label">为什么会发生</span>{item.why}</p><p><span className="detail-label">推荐策略</span>{item.action}</p><p><span className="detail-label">支持该策略的证据</span>{item.confidence === 'high' ? '当前数据提供直接证据。' : item.confidence === 'medium' ? '当前数据支持风险判断，但仍需完整周期复核。' : '样本较少，只能作为复核候选。'}</p><p><span className="detail-label">如何判断策略有效</span>{item.verification}</p><p><span className="detail-label">什么情况下不要调整</span>{item.stopCandidate ? '未排除转化延迟、追踪错误和搜索意图之前，不要自动否词或立即停投。' : '数据周期不完整、口径变化或仍在学习期时，不要把短期波动当成策略效果。'}</p>{item.stopCandidate ? <div className="candidate-label">仅为复核/停止候选，不会自动添加否定词</div> : null}</article>)}</div>
             {diagnosis.dataGaps.length ? <div className="data-gap-list"><h3>数据缺口</h3>{diagnosis.dataGaps.map((gap) => <p key={gap}>{gap}</p>)}</div> : null}
           </section>
         </>}</div>

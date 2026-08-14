@@ -115,7 +115,7 @@ test('explains activeTab permission instead of misreporting a normal website as 
   });
   expect(visibleActiveUrl).toBe(ungrantedPage.url());
   await panelPage.getByRole('button', { name: '重新扫描当前页面' }).click();
-  await expect(panelPage.getByRole('heading', { name: '需要授权当前网站' })).toBeVisible({ timeout: 8_000 });
+  await expect(panelPage.getByRole('heading', { name: '需要授权当前页面' })).toBeVisible({ timeout: 8_000 });
   await expect(panelPage.getByText('可以只授权当前网站')).toBeVisible();
   await expect(panelPage.getByText('扫描设置')).toHaveCount(0);
   await expect(panelPage.getByText('目标查询')).toHaveCount(0);
@@ -126,15 +126,22 @@ test('explains activeTab permission instead of misreporting a normal website as 
   await ungrantedPage.close();
 });
 
-test('automatically audits the current website before opening the SEM workspace', async () => {
+test('automatically scans the current website before opening advanced workspaces', async () => {
   await fixturePage.goto('http://127.0.0.1:4173/healthy.html');
   await fixturePage.bringToFront();
   await triggerExtensionAction(fixturePage);
+  await expect(panelPage.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true');
+  await expect(panelPage.getByTestId('overall-score')).not.toHaveText('—', { timeout: 20_000 });
+  await expect(panelPage.getByText('今天先做', { exact: false })).toHaveCount(0);
+  await expect(panelPage.getByText('执行队列', { exact: false })).toHaveCount(0);
+  await panelPage.getByRole('tab', { name: '海外站优化' }).click();
   await expect(panelPage.getByRole('heading', { name: '海外站优化' })).toBeVisible();
   await expect(panelPage.getByLabel('当前检查网站 127.0.0.1')).toBeVisible({ timeout: 20_000 });
   await expect(panelPage.getByLabel('海外站项目')).toHaveCount(0);
   await expect(panelPage.getByRole('button', { name: '新建项目' })).toHaveCount(0);
   await expect(panelPage.getByLabel('网站地址')).toHaveCount(0);
+  await expect(panelPage.getByText('自动检查完成')).toBeVisible();
+  await expect(panelPage.getByText('当前为单语言页面，不要求 hreflang')).toBeVisible();
   await panelPage.setViewportSize({ width: 320, height: 800 });
   const overseasLayout = await panelPage.locator('.overseas-workspace').evaluate((workspace) => ({
     overflow: workspace.scrollWidth - workspace.clientWidth,
@@ -160,16 +167,11 @@ test('automatically audits the current website before opening the SEM workspace'
 
   await panelPage.locator('details.sem-advanced-settings summary').click();
   await expect(panelPage.getByLabel('项目名称')).toHaveValue('127.0.0.1');
-  const onboardingSteps = panelPage.locator('.sem-onboarding li');
-  await expect(onboardingSteps).toHaveCount(3);
-  await expect(onboardingSteps.nth(0)).not.toHaveClass(/complete/);
-  await expect(onboardingSteps.nth(1)).not.toHaveClass(/complete/);
-  await expect(onboardingSteps.nth(2)).not.toHaveClass(/complete/);
+  await expect(panelPage.locator('.sem-onboarding')).toHaveCount(0);
   await panelPage.getByLabel('项目名称').fill('SEM E2E 项目');
   await panelPage.getByLabel('核心转化').fill('有效线索');
   await panelPage.getByLabel('品牌词').fill('SEM E2E');
   await panelPage.getByLabel('目标 CPA').fill('100');
-  await expect(onboardingSteps.nth(0)).toHaveClass(/complete/);
 
   const semTabs = panelPage.getByRole('tablist', { name: 'SEM 工作区' });
   await semTabs.getByRole('tab', { name: '落地页' }).click();
@@ -194,7 +196,6 @@ test('automatically audits the current website before opening the SEM workspace'
   await expect(panelPage.getByText('google-ads.csv').last()).toBeVisible();
 
   await semTabs.getByRole('tab', { name: '概况' }).click();
-  await expect(onboardingSteps.nth(1)).toHaveClass(/complete/);
   const changeLog = panelPage.locator('details.sem-change-log');
   await changeLog.locator('summary').click();
   await panelPage.getByLabel('具体改动').fill('品牌搜索系列日预算从 100 调到 120');
@@ -243,7 +244,7 @@ test('automatically audits the current website before opening the SEM workspace'
   await panelPage.locator('details.sem-advanced-settings summary').click();
   await expect(panelPage.getByLabel('项目名称')).toHaveValue('SEM E2E 项目');
   await expect(panelPage.getByLabel('目标 CPA')).toHaveValue('100');
-  await expect(panelPage.locator('.sem-onboarding li.complete')).toHaveCount(3);
+  await expect(panelPage.locator('.sem-onboarding')).toHaveCount(0);
   const persistedChangeLog = panelPage.locator('details.sem-change-log');
   await persistedChangeLog.locator('summary').click();
   await expect(panelPage.getByText('品牌搜索系列日预算从 100 调到 120')).toBeVisible();
@@ -257,7 +258,8 @@ test('automatically audits the current website before opening the SEM workspace'
   await panelPage.locator('details.sem-advanced-settings summary').click();
   panelPage.once('dialog', (dialog) => void dialog.accept());
   await panelPage.getByRole('button', { name: '删除当前项目' }).click();
-  await expect(panelPage.getByRole('heading', { name: '先告诉插件要分析哪个网站' })).toBeVisible();
+  await expect(panelPage.getByRole('heading', { name: '先告诉插件要分析哪个网站' })).toHaveCount(0);
+  await expect(panelPage.getByRole('heading', { name: 'SEM 诊断' })).toBeVisible();
   await panelPage.getByRole('tab', { name: '概览' }).click();
 });
 
@@ -267,7 +269,9 @@ test.afterAll(async () => {
 });
 
 test('runs the complete scan, annotation, stale, tab state, and restricted-page workflow', async () => {
-  test.setTimeout(120_000);
+  // This end-to-end path includes a 20-page site audit, responsive checks,
+  // recommendation navigation, streamed AI, tab isolation, and stale recovery.
+  test.setTimeout(180_000);
   await fixturePage.goto('http://127.0.0.1:4173/media-links.html');
   await fixturePage.bringToFront();
   await triggerExtensionAction(fixturePage);
@@ -277,7 +281,8 @@ test('runs the complete scan, annotation, stale, tab state, and restricted-page 
   const overviewSections = panelPage.getByRole('tablist', { name: '概览内容' });
   await expect(overviewSections.getByRole('tab').allTextContents()).resolves.toEqual(['摘要', '页面信息', '页面数据', '站点审计']);
   await expect(panelPage.getByRole('heading', { name: '得分与扣分明细' })).toBeVisible();
-  await expect(panelPage.getByRole('tab', { name: /扣分项/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(panelPage.getByRole('heading', { name: /已通过与获得分数/ })).toBeVisible();
+  await expect(panelPage.getByRole('heading', { name: /扣分项目/ })).toBeVisible();
   await expect(panelPage.getByText('规则获得')).toBeVisible();
   await expect(panelPage.getByText('实际扣分')).toBeVisible();
   await overviewSections.getByRole('tab', { name: '页面信息' }).click();
@@ -314,17 +319,18 @@ test('runs the complete scan, annotation, stale, tab state, and restricted-page 
   }
   await panelPage.setViewportSize({ width: 375, height: 800 });
   await overviewSections.getByRole('tab', { name: '摘要' }).click();
-  await expect(panelPage.getByRole('button', { name: '重新扫描页面' })).toBeVisible();
+  await expect(panelPage.getByRole('button', { name: '重新扫描当前页面' })).toBeVisible();
   await expect(panelPage.getByText('本次结果不代表实际收录或排名')).toBeVisible();
   await expect(panelPage.getByRole('heading', { name: '本次访问性能' })).toBeVisible();
   await expect(panelPage.getByText('最大内容出现速度')).toBeVisible();
   await expect(panelPage.getByText('首个内容出现速度')).toBeVisible();
-  await expect(panelPage.getByText('INP', { exact: true })).toHaveCount(0);
+  await expect(panelPage.getByText('INP', { exact: true })).toBeVisible();
+  await expect(panelPage.getByText(/INP 只有本次扫描观察到真实交互时才显示样本/)).toBeVisible();
   await expect(panelPage.getByText('搜索引擎能否访问页面、理解索引指令，并把页面加入索引。')).toBeVisible();
   await expect(panelPage.getByTestId('overall-score')).not.toHaveText('—');
   await expect(panelPage.getByRole('tablist', { name: '搜索增长工作台' }).getByRole('tab').allTextContents()).resolves.toEqual(['概览概览', '问题问题', '优化建议建议', '海外站优化海外', 'AI 深度解读AI', 'SEMSEM']);
   await expect(panelPage.getByText('页面 SEO 基础分', { exact: true })).toBeVisible();
-  await expect(panelPage.getByRole('heading', { name: '页面目标' })).toBeVisible();
+  await expect(panelPage.getByRole('heading', { name: '页面目标' })).toHaveCount(0);
   await expect(panelPage.getByRole('heading', { name: '站点审计' })).toHaveCount(0);
   await overviewSections.getByRole('tab', { name: '站点审计' }).click();
   await expect(panelPage.getByText(/判断问题是单页写错，还是模板或配置写错/)).toBeVisible();
@@ -433,30 +439,24 @@ test('runs the complete scan, annotation, stale, tab state, and restricted-page 
   await expect(panelPage.getByRole('tab', { name: '问题' })).toHaveAttribute('aria-selected', 'true');
   await panelPage.getByRole('tab', { name: '问题' }).press('ArrowRight');
   await expect(panelPage.getByRole('tab', { name: '优化建议' })).toHaveAttribute('aria-selected', 'true');
-  await expect(panelPage.getByRole('heading', { name: '从哪里开始优化' })).toBeVisible();
-  await expect(panelPage.getByText('为什么要优化', { exact: true }).first()).toBeVisible();
-  await expect(panelPage.getByText('优化后预期', { exact: true }).first()).toBeVisible();
-  await expect(panelPage.getByText('如何验证', { exact: true }).first()).toBeVisible();
+  await expect(panelPage.getByRole('heading', { name: '网站优化方案' })).toBeVisible();
+  await expect(panelPage.getByText('执行队列', { exact: false })).toHaveCount(0);
+  await expect(panelPage.locator('select')).toHaveCount(0);
+  await expect(panelPage.locator('strong')).toHaveCount(0);
+  await expect(panelPage.getByText('推荐策略', { exact: false }).first()).toBeVisible();
+  await expect(panelPage.getByText('通常修改位置', { exact: true }).first()).toBeVisible();
+  await expect(panelPage.getByRole('button', { name: /查看代码解释/ }).first()).toBeVisible();
+  await panelPage.getByRole('button', { name: /建议分类/ }).click();
+  await expect(panelPage.getByRole('listbox', { name: '建议分类' })).toBeVisible();
+  await panelPage.keyboard.press('End');
+  await panelPage.keyboard.press('Escape');
+  await expect(panelPage.getByRole('button', { name: /建议分类/ })).toBeFocused();
   if (process.env.SEO_OPT_SCREENSHOTS === '1') {
     await panelPage.screenshot({ path: '/tmp/seo-opt-recommendations-375-light.png' });
   }
-  const recommendationTitle = await panelPage.locator('.recommendation-item').first().locator('.recommendation-title-text').innerText();
-  await panelPage.getByRole('button', { name: '查看完整问题' }).first().click();
+  await panelPage.getByRole('tab', { name: '问题' }).click();
   await expect(panelPage.getByRole('tab', { name: '问题' })).toHaveAttribute('aria-selected', 'true');
-  await expect(panelPage.getByText('修改步骤', { exact: true })).toBeVisible();
-  await expect(panelPage.getByText('代码修改建议', { exact: true }).first()).toBeVisible();
-  await expect(panelPage.getByRole('button', { name: /复制/ }).first()).toBeVisible();
   await expect(panelPage.getByRole('button', { name: '状态：未通过（失败/警告）' })).toBeVisible();
-  const expandedIssueCard = panelPage.locator('.issue-card').filter({ hasText: recommendationTitle }).first();
-  const expandedCardPosition = await expandedIssueCard.evaluate((element) => {
-    const card = element.getBoundingClientRect();
-    const mainElement = document.querySelector<HTMLElement>('.app-main');
-    const main = mainElement?.getBoundingClientRect();
-    const toolbar = document.querySelector<HTMLElement>('.filter-toolbar')?.getBoundingClientRect();
-    return { cardTop: card.top, cardBottom: card.bottom, mainTop: main?.top ?? 0, mainBottom: main?.bottom ?? 0, toolbarBottom: toolbar?.bottom ?? 0, scrollTop: mainElement?.scrollTop ?? 0, scrollHeight: mainElement?.scrollHeight ?? 0, clientHeight: mainElement?.clientHeight ?? 0 };
-  });
-  expect(expandedCardPosition.cardTop).toBeGreaterThanOrEqual(Math.max(expandedCardPosition.mainTop, expandedCardPosition.toolbarBottom) - 1);
-  expect(expandedCardPosition.cardTop).toBeLessThan(expandedCardPosition.mainBottom);
   await expect(panelPage.locator('.issue-card.status-pass')).toHaveCount(0);
   await expect(panelPage.locator('.issue-card.status-informational')).toHaveCount(0);
   await expect(panelPage.locator('.issue-card.status-not_measurable')).toHaveCount(0);
@@ -474,6 +474,14 @@ test('runs the complete scan, annotation, stale, tab state, and restricted-page 
   await panelPage.getByRole('button', { name: '重置筛选' }).click();
   await expect(panelPage.getByText('图片替代文本', { exact: true })).toBeVisible();
   await panelPage.getByText('图片替代文本', { exact: true }).click();
+  const issueScrollBeforeRecommendation = await panelPage.locator('.app-main').evaluate((element) => element.scrollTop);
+  await panelPage.getByRole('button', { name: '查看完整优化建议' }).click();
+  await expect(panelPage.getByRole('tab', { name: '优化建议' })).toHaveAttribute('aria-selected', 'true');
+  await expect(panelPage.locator('.recommendation-expanded')).toBeVisible();
+  await panelPage.getByRole('button', { name: '查看完整问题' }).first().click();
+  await expect(panelPage.getByRole('tab', { name: '问题' })).toHaveAttribute('aria-selected', 'true');
+  await expect(panelPage.getByRole('button', { name: '状态：未通过（失败/警告）' })).toBeVisible();
+  await expect.poll(() => panelPage.locator('.app-main').evaluate((element) => element.scrollTop)).toBeGreaterThanOrEqual(Math.max(0, issueScrollBeforeRecommendation - 8));
   await fixturePage.bringToFront();
   await clickWithoutFocusing(panelPage, '网页定位');
   await expect.poll(() => fixturePage.locator('#seo-opt-overlay-root').count()).toBe(1);
@@ -503,7 +511,7 @@ test('runs the complete scan, annotation, stale, tab state, and restricted-page 
   await panelPage.getByRole('button', { name: '关闭设置' }).click();
   await clickWithoutFocusing(panelPage, 'AI 深度解读');
   await expect(panelPage.getByText('每轮都会携带最新评分')).toBeVisible();
-  await panelPage.getByRole('button', { name: /按 P0 到 P3/ }).click();
+  await panelPage.getByRole('button', { name: '用普通话解释当前网站的问题和优化策略。' }).click();
   await expect(panelPage.locator('.ai-message-streaming')).toBeVisible({ timeout: 3_000 });
   await expect(panelPage.locator('.ai-message-streaming')).toContainText('第 1 轮');
   await expect(panelPage.getByRole('heading', { name: '第 1 轮回答' })).toBeVisible({ timeout: 10_000 });
@@ -584,9 +592,9 @@ test('runs the complete scan, annotation, stale, tab state, and restricted-page 
 
   await fixturePage.bringToFront();
   await fixturePage.evaluate(() => history.pushState({}, '', '/media-links.html?view=changed'));
-  await expect(panelPage.getByText('当前结果可能过期')).toBeVisible({ timeout: 5_000 });
-  await expect(panelPage.getByText('页面信息已经过期')).toBeVisible();
-  await expect(panelPage.getByLabel('继续追问')).toBeDisabled();
+  await expect(panelPage.getByText(/media-links\.html\?view=changed/).first()).toBeVisible({ timeout: 20_000 });
+  await expect(panelPage.getByText('证据已更新', { exact: true }).first()).toBeVisible();
+  await expect(panelPage.getByLabel('继续追问')).toBeEnabled();
 
   const secondTab = await context.newPage();
   await secondTab.goto('http://127.0.0.1:4173/noindex.html');
@@ -596,21 +604,12 @@ test('runs the complete scan, annotation, stale, tab state, and restricted-page 
   await expect(panelPage.getByLabel('当前检查网站 127.0.0.1')).toBeVisible({ timeout: 20_000 });
   await clickWithoutFocusing(panelPage, '概览');
   await expect(panelPage.getByText(/noindex\.html/).first()).toBeVisible({ timeout: 20_000 });
-  const indexGoal = panelPage.getByRole('button', { name: /是否希望被搜索到/ });
-  await expect(indexGoal).toHaveText('还不确定');
-  await indexGoal.focus();
-  await indexGoal.press('ArrowDown');
-  await expect(panelPage.getByRole('listbox', { name: '是否希望被搜索到' })).toBeVisible();
-  await panelPage.getByRole('option', { name: /还不确定/ }).press('ArrowDown');
-  await panelPage.getByRole('option', { name: /希望被搜索到/ }).press('Enter');
-  await expect(indexGoal).toHaveText('希望被搜索到');
-  await panelPage.getByRole('button', { name: '保存目标并重新计算' }).click();
-  await expect(panelPage.getByText(/页面目标已保存，页面 SEO 基础分/)).toBeVisible();
   await clickWithoutFocusing(panelPage, '问题');
-  await expect(panelPage.getByRole('button', { name: /P0 索引指令/ })).toBeVisible({ timeout: 20_000 });
+  await expect(panelPage.getByRole('button', { name: /P0 索引指令/ })).toHaveCount(0);
   await clickWithoutFocusing(panelPage, '概览');
   await panelPage.getByRole('tablist', { name: '概览内容' }).getByRole('tab', { name: '页面信息' }).click();
   await expect(panelPage.getByText('不应出现在索引中的测试页').first()).toBeVisible();
+  await expect(panelPage.getByText('noindex,follow', { exact: true })).toBeVisible();
   await clickWithoutFocusing(panelPage, 'AI 深度解读');
   await expect(panelPage.getByRole('heading', { name: '第 1 轮回答' })).toBeVisible();
   await expect(panelPage.getByText('证据已更新', { exact: true }).first()).toBeVisible();
@@ -619,21 +618,25 @@ test('runs the complete scan, annotation, stale, tab state, and restricted-page 
   await isolatedOrigin.goto('http://localhost:4173/healthy.html');
   await isolatedOrigin.bringToFront();
   await triggerExtensionAction(isolatedOrigin);
-  await expect(panelPage.getByRole('heading', { name: '海外站优化' })).toBeVisible();
   await clickWithoutFocusing(panelPage, 'AI 深度解读');
   await expect(panelPage.getByText('从当前审计继续追问')).toBeVisible({ timeout: 20_000 });
   await expect(panelPage.getByRole('heading', { name: '第 1 轮回答' })).toHaveCount(0);
   await isolatedOrigin.close();
 
   await fixturePage.bringToFront();
-  await expect(panelPage.getByText('当前结果可能过期')).toBeVisible({ timeout: 5_000 });
+  await expect(panelPage.getByText(/media-links\.html\?view=changed/).first()).toBeVisible({ timeout: 20_000 });
+  await expect(panelPage.getByText('当前结果可能过期')).toHaveCount(0);
   await secondTab.close();
 
   const restricted = await context.newPage();
   await restricted.goto('chrome://settings/');
   await restricted.bringToFront();
   await triggerExtensionAction(restricted);
-  await expect(panelPage.getByText('当前页面不可测')).toBeVisible({ timeout: 8_000 });
+  await expect(panelPage.getByRole('heading', { name: '当前页面不可测' })).toBeVisible({ timeout: 8_000 });
+  await restricted.goto('http://127.0.0.1:4173/healthy.html');
+  await panelPage.getByRole('tab', { name: '概览' }).click();
+  await expect(panelPage.getByTestId('overall-score')).not.toHaveText('—', { timeout: 20_000 });
+  await expect(panelPage.getByRole('heading', { name: '当前页面不可测' })).toHaveCount(0);
   await restricted.close();
 });
 
@@ -642,22 +645,63 @@ test('runs the complete overseas optimization workflow', async () => {
   await fixturePage.goto('http://127.0.0.1:4173/overseas-demo.html');
   await fixturePage.bringToFront();
   await triggerExtensionAction(fixturePage);
+  await panelPage.getByRole('tab', { name: '海外站优化' }).click();
   await expect(panelPage.getByRole('heading', { name: '海外站优化' })).toBeVisible();
   await expect(panelPage.getByLabel('当前检查网站 127.0.0.1')).toBeVisible({ timeout: 20_000 });
   await expect(panelPage.getByLabel('网站地址')).toHaveCount(0);
 
   const overseasTabs = panelPage.getByRole('tablist', { name: '海外站优化工作区' });
-  await expect(overseasTabs.getByRole('tab').allTextContents()).resolves.toEqual(['概况', '国际 SEO', '追踪测试', '数据核对']);
+  await expect(overseasTabs.getByRole('tab').allTextContents()).resolves.toEqual(['概况', '问题', '优化建议', '追踪']);
   await overseasTabs.getByRole('tab', { name: '概况' }).focus();
   await panelPage.keyboard.press('End');
-  await expect(overseasTabs.getByRole('tab', { name: '数据核对' })).toHaveAttribute('aria-selected', 'true');
+  await expect(overseasTabs.getByRole('tab', { name: '追踪' })).toHaveAttribute('aria-selected', 'true');
   await panelPage.keyboard.press('Home');
   await expect(overseasTabs.getByRole('tab', { name: '概况' })).toHaveAttribute('aria-selected', 'true');
+
+  await expect(panelPage.getByText('自动检查完成')).toBeVisible();
+  await expect(panelPage.locator('.overseas-result-group')).toHaveCount(4);
+  await expect(panelPage.getByRole('heading', { name: '搜索访问' })).toBeVisible();
+  await expect(panelPage.getByRole('heading', { name: '语言与地区' })).toBeVisible();
+  await expect(panelPage.getByRole('heading', { name: '数据统计' })).toBeVisible();
+  await expect(panelPage.getByRole('heading', { name: '广告与业务' })).toBeVisible();
+  const overseasCounts = (await panelPage.locator('.overseas-counts .count-value').allTextContents()).map(Number);
+  expect(overseasCounts).toHaveLength(3);
+  await expect(panelPage.locator('details.overseas-normal-details > summary')).toContainText('查看已确认正常项目');
+  await expect(panelPage.locator('details.overseas-evidence-boundaries > summary')).toContainText('查看检测边界');
+  await expect(panelPage.getByText('接下来怎么做', { exact: true })).toHaveCount(0);
+  await expect(panelPage.getByText('下一步检查', { exact: true })).toHaveCount(0);
+  await expect(panelPage.getByRole('button', { name: '刷新页面证据' })).toHaveCount(0);
+
+  const assertOverseasLayout = async (label: string) => {
+    for (const width of [320, 375, 414, 768]) {
+      await panelPage.setViewportSize({ width, height: 800 });
+      const layout = await panelPage.locator('.overseas-workspace').evaluate((workspace) => ({
+        overflow: workspace.scrollWidth - workspace.clientWidth,
+        undersized: Array.from(workspace.querySelectorAll<HTMLElement>('button, summary'))
+          .filter((element) => {
+            const rect = element.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== 'hidden';
+          })
+          .map((element) => {
+            const rect = element.getBoundingClientRect();
+            return { width: rect.width, height: rect.height, label: element.getAttribute('aria-label') || element.textContent || '' };
+          })
+          .filter((control) => control.width < 44 || control.height < 44),
+      }));
+      expect(layout.overflow, `${width}px ${label} horizontal overflow`).toBeLessThanOrEqual(1);
+      expect(layout.undersized, `${width}px ${label} controls smaller than 44px`).toEqual([]);
+      if (process.env.SEO_OPT_SCREENSHOTS === '1') {
+        const screenshotLabel = label.replaceAll(' ', '-');
+        await panelPage.screenshot({ path: `/tmp/seo-opt-${screenshotLabel}-${width}.png` });
+      }
+    }
+    await panelPage.setViewportSize({ width: 375, height: 800 });
+  };
+  await assertOverseasLayout('overseas summary');
 
   await panelPage.locator('details.optional-settings summary').click();
   await panelPage.getByLabel('目标国家或地区').fill('美国');
   await panelPage.getByLabel('目标语言').fill('en-US');
-  await panelPage.getByLabel('核心转化').fill('有效咨询');
   const engineSelect = panelPage.getByRole('button', { name: /主要搜索引擎/ });
   await engineSelect.focus();
   await engineSelect.press('ArrowDown');
@@ -665,14 +709,37 @@ test('runs the complete overseas optimization workflow', async () => {
   await panelPage.getByRole('option', { name: 'Google', exact: true }).press('Enter');
   await expect(engineSelect).toContainText('Google');
 
-  await overseasTabs.getByRole('tab', { name: '国际 SEO' }).click();
-  await expect(panelPage.getByRole('heading', { name: '语言页能否互相说明关系' })).toBeVisible();
-  await panelPage.getByRole('button', { name: '检查相关语言页' }).click();
-  await expect(panelPage.getByText(/已检查 .* 个相关语言页/)).toBeVisible({ timeout: 20_000 });
-  await expect(panelPage.getByText('en-US', { exact: true }).first()).toBeVisible();
+  const languageGroup = panelPage.locator('.overseas-result-group').filter({ has: panelPage.getByRole('heading', { name: '语言与地区' }) });
+  await languageGroup.locator('summary').click();
+  await expect(languageGroup.getByText(/已自动检查 \d+ 个/)).toBeVisible({ timeout: 20_000 });
+  await overseasTabs.getByRole('tab', { name: '问题' }).click();
+  if (overseasCounts[1]! > 0) {
+    await expect(panelPage.locator('.overseas-problem-card')).toHaveCount(overseasCounts[1]!);
+    const problem = panelPage.locator('.overseas-problem-card').first();
+    const findingId = await problem.getAttribute('data-overseas-problem-id');
+    expect(findingId).toBeTruthy();
+    await problem.getByRole('button', { name: '查看优化建议' }).click();
+    await expect(overseasTabs.getByRole('tab', { name: '优化建议' })).toHaveAttribute('aria-selected', 'true');
+    const linkedRecommendation = panelPage.locator(`[data-recommendation-id="${findingId}"]`);
+    await expect(linkedRecommendation).toBeVisible();
+    await expect(linkedRecommendation.locator('.recommendation-summary')).toHaveAttribute('aria-expanded', 'true');
+  } else {
+    await expect(panelPage.getByText('本次未取得直接异常证据')).toBeVisible();
+    await panelPage.getByRole('button', { name: '查看优化建议' }).click();
+  }
+  await expect(overseasTabs.getByRole('tab', { name: '优化建议' })).toHaveAttribute('aria-selected', 'true');
+  expect(await panelPage.locator('.overseas-recommendations-panel .recommendation-item').count()).toBeGreaterThan(0);
 
-  await overseasTabs.getByRole('tab', { name: '追踪测试' }).click();
-  await expect(panelPage.getByRole('heading', { name: '现场确认事件有没有按预期发生' })).toBeVisible();
+  await overseasTabs.getByRole('tab', { name: '追踪' }).click();
+  await expect(panelPage.getByRole('heading', { name: '追踪', exact: true })).toBeVisible();
+  await expect.poll(() => panelPage.locator('.app-main').evaluate((element) => element.scrollTop)).toBeLessThanOrEqual(1);
+  const trackingTool = panelPage
+    .locator('details.tracking-tool-section')
+    .filter({ hasText: '现场追踪测试' });
+  if (!(await trackingTool.evaluate((element) => (element as HTMLDetailsElement).open))) {
+    await trackingTool.locator(':scope > summary').click();
+  }
+  await assertOverseasLayout('tracking test');
   await panelPage.getByRole('button', { name: '开始测试' }).click();
   await expect(panelPage.getByText('REC', { exact: true })).toBeVisible({ timeout: 8_000 });
   await fixturePage.bringToFront();
@@ -680,14 +747,11 @@ test('runs the complete overseas optimization workflow', async () => {
   await panelPage.getByRole('button', { name: '成功操作已完成' }).click();
   await fixturePage.bringToFront();
   await fixturePage.getByRole('button', { name: 'Submit an invalid form' }).click();
-  await panelPage.getByRole('button', { name: '失败操作已完成' }).click();
   await fixturePage.getByRole('button', { name: 'Open pricing route' }).click();
-  await expect(panelPage.getByText('generate_lead', { exact: true }).first()).toBeVisible({ timeout: 8_000 });
-  await expect(panelPage.locator('.tracking-event').filter({ hasText: 'generate_lead' }).filter({ hasText: 'bing_uet · event' })).toBeVisible();
-  await expect(panelPage.getByText('form_error', { exact: true })).toBeVisible();
-  await expect(panelPage.getByText('pushState', { exact: true })).toBeVisible();
-  await expect(panelPage.getByText('成功操作已完成', { exact: true })).toBeVisible();
-  await expect(panelPage.getByText('失败操作已完成', { exact: true })).toBeVisible();
+  await fixturePage.evaluate(() => {
+    const queue = (window as typeof window & { uetq: unknown[] }).uetq;
+    for (let index = 0; index < 25; index += 1) queue.push('event', `flush_tail_${index}`, {});
+  });
   const wrappedState = await fixturePage.evaluate(() => {
     const root = window as typeof window & { dataLayer?: { push: unknown }; uetq?: { push: unknown }; __seoOptOriginalDataLayerPush?: unknown; __seoOptOriginalUetPush?: unknown };
     return {
@@ -695,13 +759,16 @@ test('runs the complete overseas optimization workflow', async () => {
       uetRestored: root.uetq?.push === root.__seoOptOriginalUetPush,
     };
   });
-  await fixturePage.evaluate(() => {
-    const queue = (window as typeof window & { uetq: unknown[] }).uetq;
-    for (let index = 0; index < 25; index += 1) queue.push('event', `flush_tail_${index}`, {});
-  });
-  await panelPage.getByRole('button', { name: '停止测试' }).click();
-  await expect(panelPage.getByText('REC', { exact: true })).toHaveCount(0);
   expect(wrappedState).toEqual({ dataLayerRestored: false, uetRestored: false });
+  await panelPage.getByRole('button', { name: '失败操作已完成' }).click();
+  await expect(panelPage.getByText('REC', { exact: true })).toHaveCount(0);
+  await panelPage.locator('.tracking-timeline-details > summary').click();
+  await expect(panelPage.getByText('generate_lead', { exact: true }).first()).toBeVisible({ timeout: 8_000 });
+  await expect(panelPage.locator('.tracking-event').filter({ hasText: 'generate_lead' }).filter({ hasText: 'bing_uet · event' })).toBeVisible();
+  await expect(panelPage.getByText('form_error', { exact: true })).toBeVisible();
+  await expect(panelPage.getByText('pushState', { exact: true })).toBeVisible();
+  await expect(panelPage.getByText('成功操作被观察到记录一次。')).toBeVisible();
+  await expect(panelPage.getByText('失败操作没有被观察为转化。')).toBeVisible();
   const restoredAfterStop = await fixturePage.evaluate(() => {
     const root = window as typeof window & { dataLayer?: { push: unknown }; uetq?: { push: unknown }; __seoOptOriginalDataLayerPush?: unknown; __seoOptOriginalUetPush?: unknown };
     return {
@@ -728,12 +795,21 @@ test('runs the complete overseas optimization workflow', async () => {
   expect(storedTrackingRuns.some((run) => run.status === 'stopped' && run.observations.some((item) => item.name === 'flush_tail_24'))).toBe(true);
   await panelPage.reload();
   await clickWithoutFocusing(panelPage, '海外站优化');
-  await panelPage.getByRole('tablist', { name: '海外站优化工作区' }).getByRole('tab', { name: '追踪测试' }).click();
+  await panelPage.getByRole('tablist', { name: '海外站优化工作区' }).getByRole('tab', { name: '追踪' }).click();
+  const restoredTrackingTool = panelPage
+    .locator('details.tracking-tool-section')
+    .filter({ hasText: '现场追踪测试' });
+  if (!(await restoredTrackingTool.evaluate((element) => (element as HTMLDetailsElement).open))) {
+    await restoredTrackingTool.locator(':scope > summary').click();
+  }
   await expect(panelPage.getByRole('heading', { name: '最近追踪测试' })).toBeVisible({ timeout: 10_000 });
+  await panelPage.locator('.tracking-timeline-details > summary').click();
   await expect(panelPage.getByText('flush_tail_24', { exact: true })).toBeVisible();
   await expect(panelPage.getByText(/stopped|completed/)).toBeVisible();
 
-  await overseasTabs.getByRole('tab', { name: '数据核对' }).click();
+  const reconciliationTool = panelPage.locator('details.tracking-tool-section').filter({ hasText: '报表数据核对' });
+  if (!(await reconciliationTool.evaluate((element) => (element as HTMLDetailsElement).open))) await reconciliationTool.locator(':scope > summary').click();
+  await assertOverseasLayout('data reconciliation');
   await panelPage.getByLabel('数据比较币种').fill('USD');
   const ga4 = panelPage.locator('section[aria-label="导入GA4 分析数据 CSV"]');
   await ga4.locator('input[type="file"]').setInputFiles({ name: 'ga4-overseas.csv', mimeType: 'text/csv', buffer: Buffer.from('日期,页面,来源,媒介,会话系列,会话数,互动会话数,用户数,事件名称,关键事件数,总收入,货币\n2026-08-01,/overseas-demo.html,google,cpc,Global Search,80,60,70,generate_lead,8,1000,USD') });
@@ -747,17 +823,21 @@ test('runs the complete overseas optimization workflow', async () => {
   await expect(panelPage.getByText('ga4-overseas.csv')).toBeVisible();
   await panelPage.getByRole('button', { name: '运行三方数据核对' }).click();
   await expect(panelPage.locator('[aria-label="追踪数据漏斗"]')).toBeVisible({ timeout: 20_000 });
-  await expect(panelPage.getByText('项目时区 / 成熟期')).toBeVisible();
+  await expect(panelPage.getByText('网站时区 / 成熟期')).toBeVisible();
   await expect(panelPage.getByText('点击 ID')).toBeVisible();
   await expect(panelPage.getByRole('heading', { name: '仍缺少的数据与口径说明' })).toHaveCount(0);
-  await overseasTabs.getByRole('tab', { name: '追踪测试' }).click();
+  await overseasTabs.getByRole('tab', { name: '问题' }).click();
+  await expect(panelPage.locator('.overseas-problem-card')).not.toHaveCount(0);
+  await overseasTabs.getByRole('tab', { name: '优化建议' }).click();
+  await expect(panelPage.locator('.overseas-recommendations-panel .recommendation-item')).not.toHaveCount(0);
+  await overseasTabs.getByRole('tab', { name: '追踪' }).click();
   await expect(panelPage.getByRole('button', { name: '删除这次追踪测试' })).toBeVisible();
   await panelPage.getByRole('button', { name: '删除这次追踪测试' }).click();
   await expect(panelPage.getByRole('button', { name: '删除这次追踪测试' })).toHaveCount(0);
 });
 
 test('generates Chrome Web Store screenshots from the real extension UI', async () => {
-  test.setTimeout(90_000);
+  test.setTimeout(150_000);
   test.skip(process.env.SEO_OPT_STORE_ASSETS !== '1', 'Store assets are generated only on demand.');
 
   await fixturePage.goto('http://127.0.0.1:4173/store-demo.html');
@@ -788,52 +868,74 @@ test('generates Chrome Web Store screenshots from the real extension UI', async 
       .toFile(join(assetsDir, filename));
   };
 
-  await capture('01-core-seo-1280x800.png');
+  await clickWithoutFocusing(panelPage, '优化建议');
+  await expect(panelPage.getByRole('heading', { name: '网站优化方案' })).toBeVisible();
+  const codeRecommendation = panelPage.locator('.recommendation-item').filter({ has: panelPage.locator('.code-advice pre code') }).first();
+  await codeRecommendation.locator('.recommendation-summary').click();
+  await codeRecommendation.getByRole('button', { name: '查看代码解释、变量、验证和回滚' }).click();
+  await expect(codeRecommendation.getByRole('heading', { name: '代码逐段解释' })).toBeVisible();
+  await codeRecommendation.locator('.code-advice').first().scrollIntoViewIfNeeded();
+  await capture('01-optimization-code-1280x800.png');
+
+  await clickWithoutFocusing(panelPage, '概览');
+  await panelPage.getByRole('tablist', { name: '概览内容' }).getByRole('tab', { name: '摘要' }).click();
+  await panelPage.locator('#view-panel').evaluate((element) => { element.scrollTop = 0; });
+  await capture('02-core-seo-1280x800.png');
+
+  await panelPage.getByRole('tablist', { name: '概览内容' }).getByRole('tab', { name: '站点审计' }).click();
+  const runSiteAudit = panelPage.getByRole('button', { name: '快速检查 20 页' });
+  await expect(runSiteAudit).toBeVisible();
+  await runSiteAudit.click();
+  await expect(panelPage.locator('.site-run-summary')).toContainText('已完成', { timeout: 20_000 });
+  const siteIssue = panelPage.locator('.site-issue-card').first();
+  await expect(siteIssue).toBeVisible();
+  await siteIssue.scrollIntoViewIfNeeded();
+  await capture('03-site-audit-1280x800.png');
 
   await fixturePage.goto('http://127.0.0.1:4173/overseas-demo.html');
   await fixturePage.bringToFront();
   await triggerExtensionAction(fixturePage);
+  await clickWithoutFocusing(panelPage, '海外站优化');
   await expect(panelPage.getByRole('heading', { name: '海外站优化' })).toBeVisible();
   await panelPage.locator('details.optional-settings summary').click();
   await panelPage.getByLabel('目标国家或地区').fill('美国');
   await panelPage.getByLabel('目标语言').fill('en-US');
-  await panelPage.getByLabel('核心转化').fill('有效咨询');
-  await panelPage.locator('#view-panel').evaluate((element) => { element.scrollTop = 0; });
-  await capture('02-overseas-summary-1280x800.png');
-
   const overseasTabs = panelPage.getByRole('tablist', { name: '海外站优化工作区' });
-  await overseasTabs.getByRole('tab', { name: '国际 SEO' }).click();
-  await panelPage.getByRole('button', { name: '检查相关语言页' }).click();
-  await expect(panelPage.getByText(/已检查 .* 个相关语言页/)).toBeVisible({ timeout: 20_000 });
-  await panelPage.locator('#view-panel').evaluate((element) => { element.scrollTop = 0; });
-  await capture('03-international-seo-1280x800.png');
+  await overseasTabs.getByRole('tab', { name: '优化建议' }).click();
+  const overseasFinding = panelPage.locator('.overseas-recommendations-panel .recommendation-item').first();
+  await expect(overseasFinding).toBeVisible({ timeout: 20_000 });
+  await overseasFinding.scrollIntoViewIfNeeded();
+  await capture('04-overseas-advice-1280x800.png');
 
-  await overseasTabs.getByRole('tab', { name: '追踪测试' }).click();
-  await panelPage.getByRole('button', { name: '开始测试' }).click();
-  await expect(panelPage.getByText('REC', { exact: true })).toBeVisible({ timeout: 8_000 });
-  await fixturePage.bringToFront();
-  await fixturePage.getByRole('button', { name: 'Book a successful demo' }).click();
-  await panelPage.getByRole('button', { name: '成功操作已完成' }).click();
-  await expect(panelPage.getByText('generate_lead', { exact: true }).first()).toBeVisible({ timeout: 8_000 });
-  await panelPage.locator('.tracking-timeline').scrollIntoViewIfNeeded();
-  await capture('04-tracking-timeline-1280x800.png');
-  await panelPage.getByRole('button', { name: '停止测试' }).click();
-  await expect(panelPage.getByText('REC', { exact: true })).toHaveCount(0);
-
-  await overseasTabs.getByRole('tab', { name: '数据核对' }).click();
-  await panelPage.getByLabel('数据比较币种').fill('USD');
-  const ga4 = panelPage.locator('section[aria-label="导入GA4 分析数据 CSV"]');
-  await ga4.locator('input[type="file"]').setInputFiles({ name: 'ga4-store.csv', mimeType: 'text/csv', buffer: Buffer.from('日期,页面,来源,媒介,会话系列,会话数,互动会话数,用户数,事件名称,关键事件数,总收入,货币\n2026-08-01,/overseas-demo.html,google,cpc,Global Search,80,60,70,generate_lead,8,1000,USD') });
-  await ga4.getByRole('button', { name: '确认导入' }).click();
-  const ads = panelPage.locator('section[aria-label="导入广告表现 CSV"]');
-  await ads.locator('input[type="file"]').setInputFiles({ name: 'ads-store.csv', mimeType: 'text/csv', buffer: Buffer.from('日期,广告系列,点击次数,费用,转化次数,最终网址,展示次数,UTM系列\n2026-08-01,Global Search,100,300,12,http://127.0.0.1:4173/overseas-demo.html,1000,Global Search') });
-  await ads.getByRole('button', { name: '确认导入' }).click();
-  const business = panelPage.locator('section[aria-label="导入业务结果 CSV"]');
-  await business.locator('input[type="file"]').setInputFiles({ name: 'business-store.csv', mimeType: 'text/csv', buffer: Buffer.from('日期,有效转化,收入,退款,毛利,UTM系列\n2026-08-01,5,800,50,400,Global Search') });
-  await business.getByRole('button', { name: '确认导入' }).click();
-  await panelPage.getByRole('button', { name: '运行三方数据核对' }).click();
-  await expect(panelPage.locator('[aria-label="追踪数据漏斗"]')).toBeVisible({ timeout: 20_000 });
-  await expect(panelPage.getByText('项目时区 / 成熟期')).toBeVisible();
-  await panelPage.locator('[aria-label="追踪数据漏斗"]').scrollIntoViewIfNeeded();
-  await capture('05-data-reconciliation-1280x800.png');
+  await clickWithoutFocusing(panelPage, 'SEM');
+  await expect(panelPage.getByRole('heading', { name: 'SEM 诊断' })).toBeVisible();
+  const semTabs = panelPage.getByRole('tablist', { name: 'SEM 工作区' });
+  await semTabs.getByRole('tab', { name: '概况' }).click();
+  await panelPage.getByLabel('货币').fill('USD');
+  await panelPage.getByLabel('核心转化').fill('有效咨询');
+  await semTabs.getByRole('tab', { name: '数据' }).click();
+  const semAds = panelPage.locator('section[aria-label="导入广告表现 CSV"]');
+  await semAds.locator('input[type="file"]').setInputFiles({
+    name: 'sem-diagnosis-ads.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from([
+      '日期,广告系列,搜索词,展示次数,点击次数,费用,转化次数,最终网址',
+      '2026-08-01,Global Search,seo audit platform,1200,96,960,8,http://127.0.0.1:4173/overseas-demo.html',
+      '2026-08-02,Global Search,free seo checker,900,80,800,0,http://127.0.0.1:4173/overseas-demo.html',
+    ].join('\n')),
+  });
+  await semAds.getByRole('button', { name: '确认导入' }).click();
+  const semBusiness = panelPage.locator('section[aria-label="导入业务结果 CSV"]');
+  await semBusiness.locator('input[type="file"]').setInputFiles({
+    name: 'sem-diagnosis-business.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('日期,有效转化,收入,退款,毛利,UTM系列\n2026-08-01,3,1200,100,500,Global Search'),
+  });
+  await semBusiness.getByRole('button', { name: '确认导入' }).click();
+  await panelPage.getByRole('button', { name: '运行 SEM 诊断' }).click();
+  await expect(semTabs.getByRole('tab', { name: '诊断' })).toHaveAttribute('aria-selected', 'true');
+  const semFinding = panelPage.locator('.sem-finding').first();
+  await expect(semFinding).toBeVisible();
+  await semFinding.scrollIntoViewIfNeeded();
+  await capture('05-sem-diagnosis-1280x800.png');
 });

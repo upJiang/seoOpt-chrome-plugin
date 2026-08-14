@@ -30,6 +30,10 @@ export const EMPTY_RESPONSE_HEADERS: ResponseHeaderSnapshot = {
   vary: null,
   age: null,
   strictTransportSecurity: null,
+  server: null,
+  poweredBy: null,
+  via: null,
+  cfRay: null,
 };
 
 export function collectResponseHeaders(headers: Headers): ResponseHeaderSnapshot {
@@ -44,6 +48,10 @@ export function collectResponseHeaders(headers: Headers): ResponseHeaderSnapshot
     vary: headers.get('vary'),
     age: headers.get('age'),
     strictTransportSecurity: headers.get('strict-transport-security'),
+    server: headers.get('server'),
+    poweredBy: headers.get('x-powered-by'),
+    via: headers.get('via'),
+    cfRay: headers.get('cf-ray'),
   };
 }
 

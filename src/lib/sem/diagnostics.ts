@@ -16,7 +16,15 @@ function divide(numerator: number, denominator: number): number | null {
 
 function money(value: number | null, currency: string): string {
   if (value === null) return '数据不足';
-  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value);
+  const normalizedCurrency = currency.trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(normalizedCurrency) || normalizedCurrency === 'UNK') {
+    return `${new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value)}（币种未设置）`;
+  }
+  try {
+    return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: normalizedCurrency, maximumFractionDigits: 2 }).format(value);
+  } catch {
+    return `${new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value)}（币种未设置）`;
+  }
 }
 
 function percent(value: number | null): string {
@@ -122,6 +130,9 @@ export function diagnoseSem(
   const sampleConfidence = confidenceFor(clicks, Math.max(platformConversions, validConversions));
   const findings: SemDiagnosticFinding[] = [];
   const dataGaps: string[] = [];
+  if (!/^[A-Z]{3}$/.test(project.currency.trim().toUpperCase())) {
+    dataGaps.push('项目币种尚未设置，金额按原始数值展示，不能与其他币种合并比较。');
+  }
   const periodComparison = compareEqualPeriods(performanceRows);
   const attribution = linkBusinessOutcomes(performanceRows, businessRows);
   const now = Date.now();

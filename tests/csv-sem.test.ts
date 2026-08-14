@@ -59,6 +59,16 @@ describe('SEM diagnosis boundaries', () => {
     expect(result.metrics.find((item) => item.id === 'platform-value-roas')?.value).toBe(4);
   });
 
+  it('keeps diagnosis usable when project currency is still unknown', () => {
+    const unknownCurrencyProject = { ...project, currency: 'unknown' };
+    const rows: SemPerformanceRow[] = [{
+      id: 'unknown-currency', datasetId: 'd1', projectId: 'p1', platform: 'google', date: '2026-08-01', campaign: 'Search', adGroup: 'Core', keyword: 'seo', searchTerm: 'seo', matchType: 'exact', landingPage: 'https://example.com', impressions: 100, clicks: 10, cost: 120, platformConversions: 2, conversionValue: 300, branded: false,
+    }];
+    const result = diagnoseSem(unknownCurrencyProject, rows, []);
+    expect(result.metrics.find((item) => item.id === 'cpc')?.formattedValue).toBe('12（币种未设置）');
+    expect(result.dataGaps.some((item) => item.includes('币种尚未设置'))).toBe(true);
+  });
+
   it('compares the latest period with the previous equal-length period', () => {
     const rows: SemPerformanceRow[] = ['2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05'].map((date, index) => ({
       id: `r${index}`, datasetId: 'd1', projectId: 'p1', platform: 'google', date, campaign: 'Search', adGroup: 'Core', keyword: 'seo', searchTerm: 'seo', matchType: 'broad', landingPage: 'https://example.com', impressions: 100, clicks: 10, cost: 100, platformConversions: 1, conversionValue: 200, branded: false,
