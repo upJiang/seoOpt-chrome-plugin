@@ -188,15 +188,56 @@ describe('overseas static diagnosis', () => {
     const first = buildOverseasSummary({ snapshot: page, staticSnapshot, settings: noTargetSettings });
     const second = buildOverseasSummary({ snapshot: page, staticSnapshot, settings: noTargetSettings });
 
-    expect(first).toMatchObject({ normalCount: 5, issueCount: 0, opportunityCount: 2 });
+    expect(first).toMatchObject({ normalCount: 5, issueCount: 0, opportunityCount: 3 });
     expect(first.opportunities.map((item) => item.id)).toEqual([
       'overseas:tracking:measurement-google-bing',
       'overseas:international:localized-pages-opportunity',
+      'overseas:business:market-conversion-support',
+    ]);
+    expect(first.marketAssessment.marketEvidence).toBe('not_observed');
+    expect(first.marketAssessment.capabilities.map((item) => item.id)).toEqual([
+      'search_access', 'localization', 'measurement', 'advertising', 'business_localization',
     ]);
     expect(first.otherAnalytics.map((item) => item.label)).toEqual(['百度统计', 'Microsoft Clarity']);
     expect(first.evidenceGaps.map((item) => item.id)).toEqual(['overseas:boundary:indexing-ranking', 'overseas:boundary:platform-business']);
     expect(second.opportunities.map((item) => item.id)).toEqual(first.opportunities.map((item) => item.id));
     expect(first.tracking.status).toBe('untested');
+  });
+
+  it('keeps domestic currency, phone and date signals from becoming overseas market evidence', () => {
+    const page = healthySnapshot({
+      htmlLang: 'zh-CN',
+      hreflangs: [],
+      visibleTextPreview: '国内服务价格 CNY 99，联系电话 +86 010-12345678，更新时间 2026-08-14。'.repeat(20),
+    });
+    const noTargetSettings = { ...settings, targetCountry: '', targetLanguage: '', useGoogleAds: false, useMicrosoftAds: false };
+    const staticSnapshot = buildOverseasStaticSnapshot(page, noTargetSettings, {
+      scriptUrls: [], inlineScriptText: [], resourceUrls: [], dataLayerEntries: [], uetEntries: [], currentUrl: page.url, finalUrl: page.url,
+    });
+    const summary = buildOverseasSummary({ snapshot: page, staticSnapshot, settings: noTargetSettings });
+
+    expect(summary.marketAssessment.marketEvidence).toBe('not_observed');
+    expect(summary.marketAssessment.capabilities.find((item) => item.id === 'business_localization')?.state).toBe('unknown');
+  });
+
+  it('requires a GA4 data request before marking overseas measurement ready', () => {
+    const page = healthySnapshot({ htmlLang: 'en-US', visibleTextPreview: 'Product support for customers in the United States.'.repeat(20) });
+    const singleMarketSettings = { ...settings, useGoogleAds: false, useMicrosoftAds: false };
+    const gtmOnly = buildOverseasStaticSnapshot(page, singleMarketSettings, {
+      scriptUrls: ['https://www.googletagmanager.com/gtm.js?id=GTM-ONLY'],
+      inlineScriptText: [], resourceUrls: [], dataLayerEntries: [], uetEntries: [], currentUrl: page.url, finalUrl: page.url,
+    });
+    const partial = buildOverseasSummary({ snapshot: page, staticSnapshot: gtmOnly, settings: singleMarketSettings });
+    expect(partial.marketAssessment.marketEvidence).toBe('partial');
+    expect(partial.marketAssessment.capabilities.find((item) => item.id === 'measurement')).toMatchObject({ state: 'partial' });
+
+    const withGa4Request = buildOverseasStaticSnapshot(page, singleMarketSettings, {
+      scriptUrls: ['https://www.googletagmanager.com/gtag/js?id=G-MARKET1'],
+      inlineScriptText: [], resourceUrls: ['https://www.google-analytics.com/g/collect?tid=G-MARKET1'], dataLayerEntries: [['config', 'G-MARKET1', {}]], uetEntries: [], currentUrl: page.url, finalUrl: page.url,
+    });
+    const established = buildOverseasSummary({ snapshot: page, staticSnapshot: withGa4Request, settings: singleMarketSettings });
+    expect(established.marketAssessment.marketEvidence).toBe('established');
+    expect(established.marketAssessment.capabilities.find((item) => item.id === 'measurement')).toMatchObject({ state: 'ready' });
   });
 
   it('turns a different configured target language into an issue instead of a language expansion opportunity', () => {
@@ -208,6 +249,26 @@ describe('overseas static diagnosis', () => {
     const summary = buildOverseasSummary({ snapshot: page, staticSnapshot, settings: targetSettings });
     expect(summary.issues.map((item) => item.title)).toContain('页面声明语言 zh-CN 与目标语言 en-US 不一致。');
     expect(summary.opportunities.map((item) => item.id)).not.toContain('overseas:international:localized-pages-opportunity');
+  });
+
+  it('keeps target-language and detected-content conflicts as separate stable findings', () => {
+    const page = healthySnapshot({
+      htmlLang: 'zh-CN',
+      hreflangs: [],
+      visibleTextPreview: 'English product information, pricing, support and delivery details for international customers.'.repeat(20),
+    });
+    const targetSettings = { ...settings, targetLanguage: 'en-US', useGoogleAds: false, useMicrosoftAds: false };
+    const staticSnapshot = buildOverseasStaticSnapshot(page, targetSettings, {
+      scriptUrls: [], inlineScriptText: [], resourceUrls: [], dataLayerEntries: [], uetEntries: [], currentUrl: page.url, finalUrl: page.url,
+    });
+    const summary = buildOverseasSummary({ snapshot: page, staticSnapshot, settings: targetSettings });
+    const languageIssues = summary.issues.filter((item) => item.area === 'localization');
+
+    expect(languageIssues.map((item) => item.id)).toEqual(expect.arrayContaining([
+      expect.stringContaining('target_language_mismatch:current:'),
+      expect.stringContaining('content_language_mismatch:current:'),
+    ]));
+    expect(new Set(languageIssues.map((item) => item.id)).size).toBe(languageIssues.length);
   });
 
   it('recomputes the target language conclusion from current settings without refreshing static evidence', () => {
@@ -261,9 +322,17 @@ describe('overseas static diagnosis', () => {
     const page = healthySnapshot({ alternatePages: [{ kind: 'mobile', href: 'https://m.3d66.com/', media: 'only screen and (max-width: 640px)' }] });
     const noAds = { ...settings, targetLanguage: '', useGoogleAds: false, useMicrosoftAds: false };
     const staticSnapshot = buildOverseasStaticSnapshot(page, noAds, { scriptUrls: [], inlineScriptText: [], resourceUrls: [], dataLayerEntries: [], uetEntries: [], currentUrl: page.url, finalUrl: page.url });
-    staticSnapshot.internationalSeo.targets = [{ kind: 'mobile', lang: '移动版', url: 'https://m.3d66.com/', status: 200, finalUrl: 'https://m.3d66.com/', reciprocal: null, canonical: 'https://www.3d66.com/', noindex: false, htmlLang: '', issue: '移动版本缺少 html lang' }];
+    staticSnapshot.internationalSeo.targets = [{
+      kind: 'mobile', lang: '移动版', url: 'https://m.3d66.com/', status: 200, finalUrl: 'https://m.3d66.com/', reciprocal: null, canonical: 'https://www.3d66.com/', noindex: false, htmlLang: '', issue: '移动版本缺少 html lang',
+      issues: [{ code: 'missing_lang', targetUrl: 'https://m.3d66.com/', status: 200, finalUrl: 'https://m.3d66.com/', htmlLang: '', canonical: 'https://www.3d66.com/', noindex: false, message: '移动版本缺少 html lang' }],
+    }];
     const summary = buildOverseasSummary({ snapshot: page, staticSnapshot, settings: noAds });
-    expect(summary.issues.map((item) => item.title)).toContain('移动版本：移动版本缺少 html lang');
+    const issue = summary.issues.find((item) => item.title === '移动版本：移动版本缺少 html lang');
+    expect(issue?.id).toBe('overseas:international:missing_lang:mobile:https%3A%2F%2Fm.3d66.com%2F');
+    expect(issue?.evidence).toContain('检查地址：https://m.3d66.com/');
+    expect(issue?.evidence).toContain('响应状态：200');
+    expect(issue?.evidence).toContain('页面语言：未声明');
+    expect(issue?.evidence).toContain('Canonical：https://www.3d66.com/');
   });
 });
 

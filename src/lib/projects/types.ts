@@ -24,6 +24,10 @@ export type OverseasSearchEngine = 'google' | 'bing' | 'both';
 export type OverseasSignalStatus = 'normal' | 'attention' | 'confirm' | 'unavailable' | 'untested';
 export type TrackingPlatform = 'google_analytics' | 'google_tag_manager' | 'google_ads' | 'bing_uet' | 'microsoft_clarity';
 export type OverseasFindingKind = 'issue' | 'opportunity';
+export type OverseasMarketEvidence = 'not_observed' | 'partial' | 'established' | 'unknown';
+export type OverseasCapabilityState = 'ready' | 'partial' | 'attention' | 'not_observed' | 'not_applicable' | 'unknown';
+export type OverseasCapabilityId = 'search_access' | 'localization' | 'measurement' | 'advertising' | 'business_localization';
+export type OverseasFindingArea = 'search_access' | 'localization' | 'measurement' | 'advertising' | 'business_localization';
 
 export interface OverseasNormalItem {
   id: string;
@@ -37,6 +41,23 @@ export interface OverseasEvidenceGap {
   confirmed: string;
   unavailable: string;
   limitation: string;
+}
+
+export interface OverseasMarketCapability {
+  id: OverseasCapabilityId;
+  label: string;
+  state: OverseasCapabilityState;
+  conclusion: string;
+  evidence: string;
+  limitation: string;
+  relatedFindingIds: string[];
+}
+
+export interface OverseasMarketAssessment {
+  marketEvidence: OverseasMarketEvidence;
+  headline: string;
+  summary: string;
+  capabilities: OverseasMarketCapability[];
 }
 
 export interface OtherAnalyticsSnapshot {
@@ -93,6 +114,7 @@ export interface OverseasDiagnosis {
   issues: OverseasDiagnosticFinding[];
   opportunities: OverseasDiagnosticFinding[];
   evidenceGaps: OverseasEvidenceGap[];
+  marketAssessment: OverseasMarketAssessment;
   normalCount: number;
   issueCount: number;
   opportunityCount: number;
@@ -173,6 +195,7 @@ export interface InternationalSeoSnapshot {
     noindex: boolean;
     htmlLang: string;
     issue: string | null;
+    issues?: InternationalTargetIssue[];
   }>;
   sitemapConsistency?: 'matched' | 'partial' | 'unavailable';
   relatedCheck?: InternationalRelatedCheck;
@@ -182,6 +205,32 @@ export interface InternationalSeoSnapshot {
     datePatterns: string[];
   };
   checkedAt: string;
+}
+
+export type InternationalTargetIssueCode =
+  | 'http_error'
+  | 'noindex'
+  | 'missing_lang'
+  | 'invalid_lang'
+  | 'target_language_mismatch'
+  | 'content_language_mismatch'
+  | 'invalid_hreflang'
+  | 'missing_self_reference'
+  | 'missing_reciprocal'
+  | 'missing_canonical'
+  | 'canonical_conflict'
+  | 'redirect_mismatch'
+  | 'language_mismatch';
+
+export interface InternationalTargetIssue {
+  code: InternationalTargetIssueCode;
+  targetUrl: string;
+  status: number | null;
+  finalUrl: string;
+  htmlLang: string;
+  canonical: string;
+  noindex: boolean;
+  message: string;
 }
 
 export interface InternationalRelatedCheck {
@@ -292,6 +341,7 @@ export interface OverseasDiagnosticFinding {
   id: string;
   kind: OverseasFindingKind;
   category: 'search_access' | 'international' | 'tracking';
+  area?: OverseasFindingArea;
   title: string;
   priority: AuditPriority;
   status: OverseasSignalStatus;

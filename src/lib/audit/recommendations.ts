@@ -404,6 +404,10 @@ function overseasRecommendation(
   report: AuditReport,
 ): OptimizationRecommendation {
   const category = overseasCategory(finding);
+  const isBusinessLocalization = finding.area === 'business_localization';
+  const recommendationLayer: ModificationLayer = isBusinessLocalization
+    ? '页面内容'
+    : category === 'international' ? 'HTML 模板' : '分析追踪配置';
   const rootCauseId = finding.id;
   const currentLanguage = report.snapshot.overseas?.internationalSeo.htmlLang || '{{CURRENT_LANGUAGE}}';
   const auditFinding: AuditFinding = {
@@ -447,13 +451,17 @@ function overseasRecommendation(
   const recipe: ImplementationRecipe = {
     id: variant.id,
     title: variant.label,
-    applicableTechnology: category === 'international' ? '最终 HTML 或国际页面模板' : 'GTM、页面追踪代码或 CMP 配置',
-    modificationLocation: category === 'international'
-      ? '当前语言页面的服务端模板、元数据组件或 CMS 多语言配置'
-      : 'GTM 容器、页面追踪初始化、Consent/CMP 或转化事件成功回调',
-    prerequisites: category === 'international'
-      ? ['确认当前页面真实语言、正式 Canonical 和确实存在的对应语言页。']
-      : ['确认标签 ID、主要转化定义和事件应在业务成功后的哪个回调触发。', '浏览器观察不能代替分析或广告平台后台确认。'],
+    applicableTechnology: isBusinessLocalization ? '页面内容、CMS 页面模块或业务配置' : category === 'international' ? '最终 HTML 或国际页面模板' : 'GTM、页面追踪代码或 CMP 配置',
+    modificationLocation: isBusinessLocalization
+      ? '目标市场语言页面的价格、服务范围、付款、配送、税费、政策和联系信息模块'
+      : category === 'international'
+        ? '当前语言页面的服务端模板、元数据组件或 CMS 多语言配置'
+        : 'GTM 容器、页面追踪初始化、Consent/CMP 或转化事件成功回调',
+    prerequisites: isBusinessLocalization
+      ? ['先确认目标国家或地区、实际服务范围、付款方式、履约时效和税费规则。', '不要在业务事实未确认前生成价格、库存或配送承诺。']
+      : category === 'international'
+        ? ['确认当前页面真实语言、正式 Canonical 和确实存在的对应语言页。']
+        : ['确认标签 ID、主要转化定义和事件应在业务成功后的哪个回调触发。', '浏览器观察不能代替分析或广告平台后台确认。'],
     variant,
     placeholders: placeholdersFor(code),
     lineExplanations: explainCode(code, rootCauseId),
@@ -477,7 +485,7 @@ function overseasRecommendation(
     evidence: [{ findingId: auditFinding.id, ruleId: auditFinding.ruleId, summary: finding.evidence, source: auditFinding.evidenceSource, confidence: finding.confidence, affectedUrls: [report.url] }],
     seoMechanism: finding.why,
     currentImpact: `${finding.applicability} ${finding.why}`,
-    strategy: { summary: finding.action, modificationLayer: category === 'international' ? 'HTML 模板' : '分析追踪配置', resolves: [finding.title] },
+    strategy: { summary: finding.action, modificationLayer: recommendationLayer, resolves: [finding.title] },
     expectedDirectResult: finding.directResult,
     possibleSearchEffect: finding.possibleEffect,
     notGuaranteed: finding.notGuaranteed,
@@ -485,9 +493,9 @@ function overseasRecommendation(
     verification: {
       codeCorrectness: [finding.verification],
       searchEffect: [finding.platformConfirmation],
-      successCriteria: [category === 'international' ? '页面及对应语言页不再出现相同冲突。' : '同一次成功业务只记录一次，失败业务不被记为主要转化。'],
+      successCriteria: [isBusinessLocalization ? '目标市场用户可以在页面上确认服务范围、费用、付款和联系路径。' : category === 'international' ? '页面及对应语言页不再出现相同冲突。' : '同一次成功业务只记录一次，失败业务不被记为主要转化。'],
     },
-    pitfalls: [category === 'international' ? '不要创建并不存在的语言页，也不要让所有语言页 Canonical 到同一个地区版本。' : '不要把标签存在当成后台接收或有效业务，也不要照抄示例标签 ID。'],
+    pitfalls: [isBusinessLocalization ? '不要把未确认的价格、税费、库存或配送承诺写进页面；先由业务负责人确认。' : category === 'international' ? '不要创建并不存在的语言页，也不要让所有语言页 Canonical 到同一个地区版本。' : '不要把标签存在当成后台接收或有效业务，也不要照抄示例标签 ID。'],
     limitations: [finding.limitation],
     findings: [auditFinding],
     effort: '中',

@@ -568,10 +568,25 @@ export interface AiContextBundle {
     consent: import('../projects/types').ConsentSignalSnapshot;
     clickParameters: Array<{ name: string; present: boolean; preservedAfterRedirect: boolean | null }>;
     otherAnalytics: Array<{ platform: string; label: string; requestObserved: boolean }>;
+    marketAssessment: null | {
+      marketEvidence: import('../projects/types').OverseasMarketEvidence;
+      headline: string;
+      summary: string;
+      capabilities: Array<{
+        id: import('../projects/types').OverseasCapabilityId;
+        label: string;
+        state: import('../projects/types').OverseasCapabilityState;
+        conclusion: string;
+        evidence: string;
+        limitation: string;
+        relatedFindingIds: string[];
+      }>;
+    };
     findings: Array<{
       id: string;
       kind: import('../projects/types').OverseasFindingKind;
       category: import('../projects/types').OverseasDiagnosticFinding['category'];
+      area?: import('../projects/types').OverseasFindingArea;
       priority: AuditPriority;
       title: string;
       confidence: import('../projects/types').EvidenceConfidence;

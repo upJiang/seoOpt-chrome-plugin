@@ -36,6 +36,7 @@ import {
 import type {
   ImportDataset,
   OverseasDiagnosticFinding,
+  OverseasMarketAssessment,
   OverseasSignalStatus,
   OverseasStaticSnapshot,
   OverseasSummary,
@@ -73,6 +74,25 @@ const GOAL_OPTIONS = [
 ] as const;
 const TRACKING_DATASET_KINDS = new Set(['analytics_performance', 'sem_performance', 'business_outcome']);
 
+const MARKET_EVIDENCE_LABELS = {
+  not_observed: '未发现明确海外建设证据',
+  partial: '已发现部分海外基础',
+  established: '已发现较完整海外基础',
+  unknown: '证据不足，暂时无法判断',
+} as const;
+
+const CAPABILITY_STATE_LABELS = {
+  ready: '已发现', partial: '部分发现', attention: '需要处理', not_observed: '未发现', not_applicable: '不适用', unknown: '无法确认',
+} as const;
+
+const FINDING_AREA_LABELS = {
+  search_access: '搜索访问',
+  localization: '语言与地区',
+  measurement: '数据统计',
+  advertising: '广告追踪',
+  business_localization: '海外转化支持',
+} as const;
+
 async function rpc<T>(message: RuntimeMessage): Promise<T> {
   const response = await chrome.runtime.sendMessage(message) as RpcResponse<T>;
   if (!response?.ok) throw new Error(response?.error || '扩展请求失败。');
@@ -99,6 +119,13 @@ function ResultGroup({ icon: Icon, title, status, conclusion, checked, impact, d
     <dl><div><dt>当前结论</dt><dd>{conclusion}</dd></div><div><dt>插件检查了什么</dt><dd>{checked}</dd></div><div><dt>这对网站有什么影响</dt><dd>{impact}</dd></div></dl>
     {details ? <details className="overseas-group-details"><summary>查看检查明细</summary>{details}</details> : null}
   </article>;
+}
+
+function MarketAssessmentPanel({ assessment }: { assessment: OverseasMarketAssessment }) {
+  return <section className={`overseas-market-assessment market-evidence-${assessment.marketEvidence}`} aria-label="海外市场建设判断">
+    <div className="market-assessment-heading"><div><p className="section-kicker">海外市场建设判断</p><h2>{assessment.headline}</h2><p>{assessment.summary}</p></div><span className="market-evidence-label">{MARKET_EVIDENCE_LABELS[assessment.marketEvidence]}</span></div>
+    <div className="market-capability-list">{assessment.capabilities.map((capability) => <article key={capability.id} className={`market-capability capability-${capability.state}`}><div className="market-capability-heading"><span>{capability.label}</span><span className="signal-state">{signalIcon(capability.state === 'attention' ? 'attention' : capability.state === 'ready' ? 'normal' : capability.state === 'not_applicable' ? 'untested' : 'confirm')}{CAPABILITY_STATE_LABELS[capability.state]}</span></div><p>{capability.conclusion}</p><details><summary>查看判断依据</summary><p>{capability.evidence}</p><p>{capability.limitation}</p></details></article>)}</div>
+  </section>;
 }
 
 interface OverseasWorkspaceProps {
@@ -285,10 +312,18 @@ export function OverseasWorkspace({ report, scanState, onScan, onGrantPageAccess
   }) : null, [currentRun, project?.international, reconciliation, report, staticSnapshot]);
   const recommendations = useMemo(() => report && summary ? buildOverseasOptimizationRecommendations(report, summary) : [], [report, summary]);
   const trackingDatasets = datasets.filter((item) => TRACKING_DATASET_KINDS.has(item.kind));
-  const trackingIssues = summary?.issues.filter((item) => item.category === 'tracking') ?? [];
-  const internationalIssues = summary?.issues.filter((item) => item.category === 'international') ?? [];
-  const searchIssues = summary?.issues.filter((item) => item.category === 'search_access') ?? [];
-  const hasAnalyticsTag = staticSnapshot?.tags.some((tag) => ['google_analytics', 'google_tag_manager', 'microsoft_clarity'].includes(tag.platform) && (tag.ids.length || tag.scriptCount || tag.initialized || tag.requestObserved)) ?? false;
+  const measurementIssues = summary?.issues.filter((item) => item.area === 'measurement') ?? [];
+  const advertisingIssues = summary?.issues.filter((item) => item.area === 'advertising') ?? [];
+  const internationalIssues = summary?.issues.filter((item) => item.area === 'localization') ?? [];
+  const searchIssues = summary?.issues.filter((item) => item.area === 'search_access') ?? [];
+  const measurementCapability = summary?.marketAssessment.capabilities.find((item) => item.id === 'measurement');
+  const measurementStatus: OverseasSignalStatus = measurementIssues.length
+    ? 'attention'
+    : measurementCapability?.state === 'ready'
+      ? 'normal'
+      : measurementCapability?.state === 'unknown'
+        ? 'unavailable'
+        : 'confirm';
   const hasAdEvidence = staticSnapshot?.tags.some((tag) => ['google_ads', 'bing_uet'].includes(tag.platform) && (tag.ids.length || tag.scriptCount || tag.initialized || tag.requestObserved)) ?? false;
 
   return <div className="overseas-workspace view-stack">
@@ -305,14 +340,16 @@ export function OverseasWorkspace({ report, scanState, onScan, onGrantPageAccess
     {project && summary && section === 'summary' ? <div id="overseas-panel-summary" role="tabpanel" aria-labelledby="overseas-tab-summary" className="overseas-panel overseas-summary-panel">
       <section className="overseas-summary-status" aria-label="海外站检查摘要">
         <div><span className="summary-scan-state"><Check size={16} />自动检查完成</span><p>{new URL(report!.url).pathname || '/'} · {new Date(staticSnapshot?.checkedAt ?? report!.createdAt).toLocaleString('zh-CN')}</p></div>
-        <div className="overseas-counts"><span className="count-good">正常 <span className="count-value">{summary.normalCount}</span></span><span className="count-attention">问题 <span className="count-value">{summary.issueCount}</span></span><span className="count-confirm">优化机会 <span className="count-value">{summary.opportunityCount}</span></span></div>
+        <div className="overseas-counts"><span className="count-good">已确认正常 <span className="count-value">{summary.normalCount}</span></span><span className="count-attention">已确认问题 <span className="count-value">{summary.issueCount}</span></span><span className="count-confirm">优化建议 <span className="count-value">{summary.opportunityCount}</span></span></div>
       </section>
+
+      <MarketAssessmentPanel assessment={summary.marketAssessment} />
 
       <div className="overseas-result-groups">
         <ResultGroup icon={Globe2} title="搜索访问" status={searchIssues.length ? 'attention' : summary.searchAccess.status} conclusion={searchIssues[0]?.title ?? (summary.searchAccess.status === 'normal' ? '当前页面可公开访问，标题和主要内容可以读取。' : summary.searchAccess.title)} checked="HTTPS、公开响应、robots、索引指令、Canonical、标题和主要正文。" impact="决定 Google 和 Bing 是否具备访问、读取和理解页面的基本条件；不等于已经收录或有排名。" details={<ul>{summary.normalItems.filter((item) => /HTTPS|公开访问|抓取规则|主要内容/.test(item.title)).map((item) => <li key={item.id}>{item.title}：{item.evidence}</li>)}</ul>} />
         <ResultGroup icon={Languages} title="语言与地区" status={internationalIssues.length ? 'attention' : 'normal'} conclusion={internationalIssues[0]?.title ?? `${staticSnapshot?.internationalSeo.htmlLang || '未声明语言'}；${staticSnapshot?.internationalSeo.hreflangCount ? `发现 ${staticSnapshot.internationalSeo.hreflangCount} 条多语言关系` : '当前为单语言页面，不要求 hreflang'}`} checked="html lang、正文语言候选、hreflang、Canonical、关联语言或移动版本及地区格式信号。" impact="帮助搜索引擎把正确语言和地区版本展示给对应用户；单语言网站无需为了工具结果创建语言页。" details={<div className="overseas-detail-stack"><p>正文语言候选：{staticSnapshot?.internationalSeo.detectedLanguage || '证据不足'} · {staticSnapshot?.internationalSeo.languageConfidence || 'low'}</p><p>关联版本：{staticSnapshot?.internationalSeo.relatedCheck?.status === 'complete' ? `已自动检查 ${staticSnapshot.internationalSeo.relatedCheck.checkedUrls.length} 个` : staticSnapshot?.internationalSeo.relatedCheck?.status === 'partial' ? '已检查可访问地址，部分跨域地址未授权' : '当前没有需要检查的关联版本'}</p>{staticSnapshot?.internationalSeo.targets?.map((target) => <p key={`${target.kind}-${target.url}`}>{target.lang}：{target.issue || `状态 ${target.status}，语言 ${target.htmlLang}`}</p>)}</div>} />
-        <ResultGroup icon={BarChart3} title="数据统计" status={trackingIssues.length ? 'attention' : hasAnalyticsTag ? 'normal' : 'confirm'} conclusion={trackingIssues[0]?.title ?? (hasAnalyticsTag ? '发现统计标签或运行证据；平台是否收到仍需后台数据证明。' : '当前未发现 GA4、GTM 或 Clarity 运行证据。')} checked="GA4、GTM、百度统计、Clarity 的标签 ID、初始化、浏览器请求和 Consent 现场。" impact="用于判断海外访问和关键事件是否有可核对的数据；安装标签本身不会提高 SEO 排名。" details={<ul>{staticSnapshot?.tags.map((tag) => <li key={tag.platform}>{PLATFORM_LABELS[tag.platform]}：{tag.requestObserved ? '观察到请求' : tag.initialized ? '观察到初始化' : tag.scriptCount || tag.ids.length ? '发现标签' : '未发现'}</li>)}{summary.otherAnalytics.map((item) => <li key={item.platform}>{item.label}：{item.requestObserved ? '观察到请求' : '发现脚本'}</li>)}</ul>} />
-        <ResultGroup icon={Radio} title="广告与业务" status={trackingIssues.length ? 'attention' : hasAdEvidence ? 'confirm' : 'untested'} conclusion={trackingIssues[0]?.title ?? (hasAdEvidence ? '发现广告追踪证据，但平台转化和真实业务仍需核对。' : '当前没有发现需要检查的 Google Ads 或 Microsoft Ads 投放证据。')} checked="Google Ads、Bing UET、点击参数保留，以及当前能确认到的页面、请求、平台和业务证据层级。" impact="防止咨询、注册或购买被漏记、重复记录或错误归因，避免广告数据误导投放判断。" details={<p>{summary.googleAds.explanation}</p>} />
+        <ResultGroup icon={BarChart3} title="数据统计" status={measurementStatus} conclusion={measurementIssues[0]?.title ?? measurementCapability?.conclusion ?? '当前未发现 GA4 或 GTM 运行证据。'} checked="GA4、GTM、百度统计、Clarity 的标签 ID、初始化、浏览器请求和 Consent 现场。" impact="用于判断海外访问和关键事件是否有可核对的数据；安装标签本身不会提高 SEO 排名。" details={<ul>{staticSnapshot?.tags.map((tag) => <li key={tag.platform}>{PLATFORM_LABELS[tag.platform]}：{tag.requestObserved ? '观察到请求' : tag.initialized ? '观察到初始化' : tag.scriptCount || tag.ids.length ? '发现标签' : '未发现'}</li>)}{summary.otherAnalytics.map((item) => <li key={item.platform}>{item.label}：{item.requestObserved ? '观察到请求' : '发现脚本'}</li>)}</ul>} />
+        <ResultGroup icon={Radio} title="广告与业务" status={advertisingIssues.length ? 'attention' : hasAdEvidence ? 'confirm' : 'untested'} conclusion={advertisingIssues[0]?.title ?? (hasAdEvidence ? '发现广告追踪证据，但平台转化和真实业务仍需核对。' : summary.marketAssessment.capabilities.find((item) => item.id === 'advertising')?.conclusion ?? '当前没有发现需要检查的 Google Ads 或 Microsoft Ads 投放证据。')} checked="Google Ads、Bing UET、点击参数保留，以及当前能确认到的页面、请求、平台和业务证据层级。" impact="防止咨询、注册或购买被漏记、重复记录或错误归因，避免广告数据误导投放判断。" details={<p>{summary.googleAds.explanation}</p>} />
       </div>
 
       <details className="plain-section overseas-normal-details"><summary>查看已确认正常项目（{summary.normalCount}）</summary><ul className="overseas-result-list status-normal">{summary.normalItems.map((item) => <li key={item.id}><Check size={17} /><span><span className="result-title">{item.title}</span><span className="result-evidence">{item.evidence}</span></span></li>)}</ul></details>
@@ -321,8 +358,8 @@ export function OverseasWorkspace({ report, scanState, onScan, onGrantPageAccess
     </div> : null}
 
     {project && summary && section === 'issues' ? <div id="overseas-panel-issues" role="tabpanel" aria-labelledby="overseas-tab-issues" className="overseas-panel overseas-issues-panel">
-      <section className="overseas-section-intro"><div><p className="section-kicker">直接证据</p><h2>海外站问题</h2><p>这里只列出已经取得直接异常证据的问题。优化机会、未运行测试和平台后台未知结果不会混入问题数量。</p></div><span className="section-count">{summary.issueCount}</span></section>
-      {summary.issues.length ? <div className="overseas-problem-list">{summary.issues.map((finding) => <article className={`overseas-problem-card priority-${finding.priority.toLocaleLowerCase()}`} key={finding.id} data-overseas-problem-id={finding.id}><div className="overseas-problem-heading"><span className={`priority-badge priority-${finding.priority.toLocaleLowerCase()}`}>{finding.priority}</span><div><h3>{finding.title}</h3><p>{finding.category === 'search_access' ? '搜索访问' : finding.category === 'international' ? '语言与地区' : '数据追踪'}</p></div></div><dl><div><dt>直接证据</dt><dd>{finding.evidence}</dd></div><div><dt>影响范围</dt><dd>当前页面及使用相同模板或追踪配置的页面</dd></div><div><dt>为什么重要</dt><dd>{finding.why}</dd></div><div><dt>检测限制</dt><dd>{finding.limitation}</dd></div></dl><button type="button" className="primary-button" onClick={() => openRecommendation(finding)}>查看优化建议</button></article>)}</div> : <section className="overseas-zero-panel" role="status"><Check size={28} /><h3>本次未取得直接异常证据</h3><p>这不代表网站没有增长空间。条件性改进和更完整的数据能力会放在“优化建议”中，并明确适用前提。</p><button type="button" className="secondary-button" onClick={() => changeSection('recommendations')}><Lightbulb size={16} />查看优化建议</button></section>}
+      <section className="overseas-section-intro"><div><p className="section-kicker">直接证据</p><h2>海外站问题</h2><p>这里只列出已经取得直接异常证据的问题。优化建议、未运行测试和平台后台未知结果不会混入问题数量。</p></div><span className="section-count">{summary.issueCount}</span></section>
+      {summary.issues.length ? <div className="overseas-problem-list">{summary.issues.map((finding) => <article className={`overseas-problem-card priority-${finding.priority.toLocaleLowerCase()}`} key={finding.id} data-overseas-problem-id={finding.id}><div className="overseas-problem-heading"><span className={`priority-badge priority-${finding.priority.toLocaleLowerCase()}`}>{finding.priority}</span><div><h3>{finding.title}</h3><p>{FINDING_AREA_LABELS[finding.area ?? (finding.category === 'search_access' ? 'search_access' : finding.category === 'international' ? 'localization' : 'measurement')]}</p></div></div><dl><div><dt>直接证据</dt><dd>{finding.evidence}</dd></div><div><dt>影响范围</dt><dd>当前页面及使用相同模板或追踪配置的页面</dd></div><div><dt>为什么重要</dt><dd>{finding.why}</dd></div><div><dt>检测限制</dt><dd>{finding.limitation}</dd></div></dl><button type="button" className="primary-button" onClick={() => openRecommendation(finding)}>查看优化建议</button></article>)}</div> : <section className="overseas-zero-panel" role="status"><Check size={28} /><h3>本次未取得直接异常证据</h3><p>这不代表网站没有增长空间。{summary.opportunityCount ? `另有 ${summary.opportunityCount} 条海外优化建议，已放在“优化建议”中。` : '条件性改进和更完整的数据能力会放在“优化建议”中。'}</p><button type="button" className="secondary-button" onClick={() => changeSection('recommendations')}><Lightbulb size={16} />查看优化建议</button></section>}
       <details className="plain-section overseas-evidence-boundaries"><summary>查看不会被当成问题的检测边界</summary><div className="boundary-list">{summary.evidenceGaps.map((gap) => <article key={gap.id}><h3>{gap.title}</h3><p>{gap.limitation}</p></article>)}</div></details>
     </div> : null}
 

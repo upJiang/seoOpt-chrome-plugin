@@ -214,13 +214,13 @@ export function SemWorkspace({ report }: { report: AuditReport | null }) {
   };
   const downloadProjectJson = async () => {
     if (!project) return;
-    const blob = new Blob([JSON.stringify(await buildProjectExport(project), null, 2)], { type: 'application/json;charset=utf-8' });
+    const blob = new Blob([JSON.stringify(await buildProjectExport(project, report), null, 2)], { type: 'application/json;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = `seo-sem-${new URL(project.origin).hostname}.json`; anchor.click(); URL.revokeObjectURL(url);
   };
   const copyProjectMarkdown = async () => {
     if (!project) return;
-    await navigator.clipboard.writeText(await projectExportMarkdown(project));
+    await navigator.clipboard.writeText(await projectExportMarkdown(project, report));
   };
   const removeCurrentProject = async () => {
     if (!project || !window.confirm(`删除项目“${project.name}”及其站点、CSV 和诊断数据？此操作无法恢复。`)) return;

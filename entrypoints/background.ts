@@ -37,7 +37,7 @@ import {
   saveOverseasReport,
   saveTrackingRun,
 } from '../src/lib/projects/db';
-import type { InternationalProjectSettings, OverseasStaticSnapshot, TrackingObservation, TrackingTestRun } from '../src/lib/projects/types';
+import type { InternationalProjectSettings, InternationalTargetIssue, OverseasStaticSnapshot, TrackingObservation, TrackingTestRun } from '../src/lib/projects/types';
 import { finalizeTrackingRun, reconcileTrackingData, validateTrackingObservation } from '../src/lib/overseas/diagnostics';
 import { installTrackingObserver, stopTrackingObserver } from '../src/lib/overseas/observer-main';
 import { baselineFromReport } from '../src/lib/remediation/tasks';
@@ -167,20 +167,36 @@ async function checkInternationalRelatedPages(snapshot: PageSnapshot): Promise<O
       const html = (await response.text()).slice(0, 2_000_000);
       const parsed = parseHreflangTargetHtml(html, response.url || target.href, currentUrl);
       const typeLabel = target.kind === 'mobile' ? '移动版本' : '语言页';
-      const issue = !response.ok
-        ? `${typeLabel}返回 ${response.status}`
-        : parsed.noindex
-          ? `${typeLabel}设置了 noindex`
-          : !parsed.htmlLang
-            ? `${typeLabel}缺少 html lang`
-            : target.kind === 'language' && !parsed.reciprocal
-              ? '没有观察到返回当前页的 hreflang'
-              : !parsed.canonical
-                ? `${typeLabel}缺少 Canonical`
-                : null;
-      return { kind: target.kind, lang: target.lang, url: target.href, status: response.status, finalUrl: response.url, reciprocal: target.kind === 'language' ? parsed.reciprocal : null, canonical: parsed.canonical, noindex: parsed.noindex, htmlLang: parsed.htmlLang, issue };
+      const issues: InternationalTargetIssue[] = [];
+      const evidence = { targetUrl: target.href, status: response.status, finalUrl: response.url || target.href, htmlLang: parsed.htmlLang, canonical: parsed.canonical, noindex: parsed.noindex };
+      if (!response.ok) {
+        issues.push({ ...evidence, code: 'http_error', message: `${typeLabel}返回 ${response.status}` });
+      } else {
+        if (parsed.noindex) issues.push({ ...evidence, code: 'noindex', message: `${typeLabel}设置了 noindex` });
+        if (!parsed.htmlLang) {
+          issues.push({ ...evidence, code: 'missing_lang', message: `${typeLabel}缺少 html lang` });
+        } else if (target.kind === 'language' && target.lang.toLocaleLowerCase() !== 'x-default'
+          && parsed.htmlLang.toLocaleLowerCase().split('-')[0] !== target.lang.toLocaleLowerCase().split('-')[0]) {
+          issues.push({ ...evidence, code: 'language_mismatch', message: `${typeLabel}声明语言 ${parsed.htmlLang} 与 hreflang ${target.lang} 不一致` });
+        }
+        if (target.kind === 'language' && !parsed.reciprocal) issues.push({ ...evidence, code: 'missing_reciprocal', message: '没有观察到返回当前页的 hreflang' });
+        if (!parsed.canonical) {
+          issues.push({ ...evidence, code: 'missing_canonical', message: `${typeLabel}缺少 Canonical` });
+        } else if (target.kind === 'language') {
+          const normalize = (value: string, base: string) => {
+            const url = new URL(value, base);
+            url.hash = '';
+            return url.href.replace(/\/$/, '');
+          };
+          if (normalize(parsed.canonical, response.url || target.href) !== normalize(response.url || target.href, target.href)) {
+            issues.push({ ...evidence, code: 'canonical_conflict', message: `${typeLabel}的 Canonical 指向其他页面` });
+          }
+        }
+      }
+      return { kind: target.kind, lang: target.lang, url: target.href, status: response.status, finalUrl: response.url, reciprocal: target.kind === 'language' ? parsed.reciprocal : null, canonical: parsed.canonical, noindex: parsed.noindex, htmlLang: parsed.htmlLang, issue: issues[0]?.message ?? null, issues };
     } catch (error) {
-      return { kind: target.kind, lang: target.lang, url: target.href, status: null, finalUrl: '', reciprocal: null, canonical: '', noindex: false, htmlLang: '', issue: error instanceof Error ? error.message : '关联版本检查失败' };
+      const message = error instanceof Error ? error.message : '关联版本检查失败';
+      return { kind: target.kind, lang: target.lang, url: target.href, status: null, finalUrl: '', reciprocal: null, canonical: '', noindex: false, htmlLang: '', issue: message, issues: [{ code: 'http_error' as const, targetUrl: target.href, status: null, finalUrl: '', htmlLang: '', canonical: '', noindex: false, message }] };
     }
   }));
   const languageTargets = targets.filter((target) => target.kind === 'language');

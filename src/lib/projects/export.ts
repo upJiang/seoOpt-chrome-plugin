@@ -1,11 +1,13 @@
 import { getProjectRows, getSitePages, latestLogSummary, latestOverseasReport, latestSemReport, latestSiteRun, listAuditBaselines, listChangeRecords, listDatasets, listTrackingRuns } from './db';
+import type { AuditReport } from '../audit/types';
+import { buildOverseasSummary } from '../overseas/diagnostics';
 import type { AnalyticsPerformanceRow, BusinessOutcomeRow, SearchProject, SemPerformanceRow, SeoPerformanceRow } from './types';
 import { summarizeSeoPerformance } from '../seo/performance';
 import { getSiteIssueDisplayTitle, getSiteIssueGuidance } from '../site-audit/guidance';
 
 function percent(value: number): string { return `${(value * 100).toFixed(2)}%`; }
 
-export async function buildProjectExport(project: SearchProject) {
+export async function buildProjectExport(project: SearchProject, currentReport: AuditReport | null = null) {
   const [datasets, siteRun, seoRows, semRows, businessRows, analyticsRows, semReport, baselines, changes, logSummary, trackingRuns, overseasReport] = await Promise.all([
     listDatasets(project.id),
     latestSiteRun(project.id),
@@ -21,6 +23,18 @@ export async function buildProjectExport(project: SearchProject) {
     latestOverseasReport(project.id),
   ]);
   const sitePages = siteRun ? await getSitePages(siteRun.id) : [];
+  const reportMatchesProject = currentReport ? (() => {
+    try { return new URL(currentReport.url).origin === project.origin; } catch { return false; }
+  })() : false;
+  const currentOverseas = reportMatchesProject && currentReport?.snapshot.overseas
+    ? buildOverseasSummary({
+      snapshot: currentReport.snapshot,
+      staticSnapshot: currentReport.snapshot.overseas,
+      settings: project.international ?? { targetCountry: '', targetLanguage: '', searchEngine: 'both', useGoogleAds: false, useMicrosoftAds: false, conversionDomains: [] },
+      trackingRun: trackingRuns[0] ?? null,
+      reconciliation: overseasReport ?? null,
+    })
+    : null;
   const seo = seoRows.length ? summarizeSeoPerformance(seoRows) : null;
   const semTotals = {
     impressions: semRows.reduce((sum, row) => sum + row.impressions, 0),
@@ -81,6 +95,14 @@ export async function buildProjectExport(project: SearchProject) {
     seo,
     sem: semReport ? { totals: semTotals, diagnosis: semReport } : { totals: semTotals, diagnosis: null },
     overseas: {
+      currentPage: currentOverseas ? {
+        url: currentReport!.url,
+        marketAssessment: currentOverseas.marketAssessment,
+        normalItems: currentOverseas.normalItems,
+        issues: currentOverseas.issues,
+        opportunities: currentOverseas.opportunities,
+        evidenceGaps: currentOverseas.evidenceGaps,
+      } : null,
       analyticsRows: analyticsRows.length,
       trackingRuns: trackingRuns.slice(0, 20).map((run) => ({
         startedAt: run.startedAt, endedAt: run.endedAt, goal: run.goal, status: run.status,
@@ -119,8 +141,8 @@ export async function buildProjectExport(project: SearchProject) {
   };
 }
 
-export async function projectExportMarkdown(project: SearchProject): Promise<string> {
-  const data = await buildProjectExport(project);
+export async function projectExportMarkdown(project: SearchProject, currentReport: AuditReport | null = null): Promise<string> {
+  const data = await buildProjectExport(project, currentReport);
   const lines = [
     `# ${project.name} 搜索增长报告`, '',
     `- 主域名：${project.origin}`,
@@ -169,7 +191,35 @@ export async function projectExportMarkdown(project: SearchProject): Promise<str
   else lines.push('尚无 SEO 搜索表现数据。');
   lines.push('', '## SEM 诊断', '', `- 成本：${data.sem.totals.cost}`, `- 平台转化：${data.sem.totals.platformConversions}`, `- 有效转化：${data.sem.totals.validConversions}`, `- 收入 / 退款 / 毛利：${data.sem.totals.revenue} / ${data.sem.totals.refunds} / ${data.sem.totals.grossProfit}`);
   for (const finding of data.sem.diagnosis?.findings ?? []) lines.push(`- ${finding.priority} ${finding.title}：${finding.action}`);
-  lines.push('', '## 海外站优化', '', `- 目标地区 / 语言：${project.international?.targetCountry || '未设置'} / ${project.international?.targetLanguage || '未设置'}`, `- 脱敏追踪测试：${data.overseas.trackingRuns.length} 次`, `- GA4 规范化数据：${data.overseas.analyticsRows} 行`);
+  lines.push('', '## 海外站优化', '', `- 目标地区 / 语言：${project.international?.targetCountry || '未设置'} / ${project.international?.targetLanguage || '未设置'}`);
+  if (data.overseas.currentPage) {
+    const current = data.overseas.currentPage;
+    lines.push(
+      `- 当前页面：${current.url}`,
+      `- 海外市场判断：${current.marketAssessment.headline}`,
+      `- 判断摘要：${current.marketAssessment.summary}`,
+      `- 市场证据状态：${current.marketAssessment.marketEvidence}`,
+      '',
+      '### 海外能力',
+      '',
+      ...current.marketAssessment.capabilities.map((item) => `- ${item.label}：${item.state}。${item.conclusion} 证据：${item.evidence}`),
+      '',
+      '### 已确认问题',
+      '',
+      ...(current.issues.map((item) => `- ${item.priority} ${item.title}：${item.evidence}`) ?? ['- 无']),
+      '',
+      '### 海外优化建议',
+      '',
+      ...(current.opportunities.map((item) => `- ${item.title}（${item.applicability}）：${item.action}`) ?? ['- 无']),
+      '',
+      '### 检测边界',
+      '',
+      ...current.evidenceGaps.map((item) => `- ${item.title}：${item.unavailable} ${item.limitation}`),
+    );
+  } else {
+    lines.push('- 当前页面海外判断：仅包含历史追踪和报表数据，未生成当前页面海外判断。');
+  }
+  lines.push(`- 脱敏追踪测试：${data.overseas.trackingRuns.length} 次`, `- GA4 规范化数据：${data.overseas.analyticsRows} 行`);
   if (data.overseas.reconciliation) {
     lines.push(
       `- 点击 → 会话 → 分析关键事件 → 平台转化 → 有效业务：${data.overseas.reconciliation.clicks} → ${data.overseas.reconciliation.sessions} → ${data.overseas.reconciliation.analyticsKeyEvents} → ${data.overseas.reconciliation.platformConversions} → ${data.overseas.reconciliation.validConversions}`,

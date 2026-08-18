@@ -7,11 +7,15 @@ import type {
   EvidenceConfidence,
   InternationalProjectSettings,
   InternationalSeoSnapshot,
+  InternationalTargetIssue,
   GoogleVerificationResult,
   OtherAnalyticsSnapshot,
   OverseasDiagnosis,
   OverseasSummary,
   OverseasDiagnosticFinding,
+  OverseasFindingArea,
+  OverseasMarketAssessment,
+  OverseasMarketCapability,
   OverseasSignalStatus,
   OverseasStaticSnapshot,
   SearchAccessConclusion,
@@ -377,6 +381,12 @@ function findingCategoryFromTitle(title: string): OverseasDiagnosticFinding['cat
   return 'tracking';
 }
 
+function findingAreaFromCategory(category: OverseasDiagnosticFinding['category']): OverseasFindingArea {
+  if (category === 'search_access') return 'search_access';
+  if (category === 'international') return 'localization';
+  return 'measurement';
+}
+
 type OverseasFindingDraft = Omit<OverseasDiagnosticFinding,
   'id' | 'kind' | 'category' | 'applicability' | 'directResult' | 'possibleEffect' | 'notGuaranteed'>
   & Partial<Pick<OverseasDiagnosticFinding,
@@ -391,12 +401,27 @@ function stableFindingId(category: OverseasDiagnosticFinding['category'], title:
   return `overseas:${category}:${(hash >>> 0).toString(36)}`;
 }
 
+function internationalIssueCode(message: string): InternationalTargetIssue['code'] {
+  if (/目标语言/.test(message)) return 'target_language_mismatch';
+  if (/正文主要语言/.test(message)) return 'content_language_mismatch';
+  if (/语言代码.*无效|html lang.*无效/.test(message)) return 'invalid_lang';
+  if (/无效 hreflang/.test(message)) return 'invalid_hreflang';
+  if (/指向自身|自引用/.test(message)) return 'missing_self_reference';
+  if (/互返|返回当前页/.test(message)) return 'missing_reciprocal';
+  if (/缺少 html lang|没有声明语言/.test(message)) return 'missing_lang';
+  if (/缺少 Canonical/.test(message)) return 'missing_canonical';
+  if (/Canonical/.test(message)) return 'canonical_conflict';
+  if (/noindex/.test(message)) return 'noindex';
+  return 'language_mismatch';
+}
+
 function finding(input: OverseasFindingDraft): OverseasDiagnosticFinding {
   const category = input.category ?? findingCategoryFromTitle(input.title);
   return {
     id: input.id ?? stableFindingId(category, input.title),
     kind: input.kind ?? 'issue',
     category,
+    area: input.area ?? findingAreaFromCategory(category),
     applicability: input.applicability ?? '适用于当前页面已经取得直接证据的情况。',
     directResult: input.directResult ?? '相关页面或追踪配置不再出现本次确认的直接异常。',
     possibleEffect: input.possibleEffect ?? '减少搜索系统理解、数据归因或业务判断中的不确定性。',
@@ -412,6 +437,124 @@ function otherAnalytics(snapshot: OverseasStaticSnapshot | null): OtherAnalytics
   return clarity && (clarity.scriptCount > 0 || clarity.initialized || clarity.requestObserved)
     ? [{ platform: 'microsoft_clarity', label: 'Microsoft Clarity', detected: true, scriptCount: clarity.scriptCount, requestObserved: clarity.requestObserved }]
     : [];
+}
+
+function buildMarketAssessment(input: {
+  snapshot: PageSnapshot;
+  staticSnapshot: OverseasStaticSnapshot | null;
+  settings: InternationalProjectSettings;
+  access: OverseasSummary['searchAccess'];
+  international: InternationalSeoSnapshot;
+  issues: OverseasDiagnosticFinding[];
+  opportunities: OverseasDiagnosticFinding[];
+}): OverseasMarketAssessment {
+  const { snapshot, staticSnapshot, settings, access, international, issues, opportunities } = input;
+  const tags = staticSnapshot?.tags ?? [];
+  const googleAnalytics = tags.find((item) => item.platform === 'google_analytics');
+  const tagManager = tags.find((item) => item.platform === 'google_tag_manager');
+  const googleAds = tags.find((item) => item.platform === 'google_ads');
+  const bingUet = tags.find((item) => item.platform === 'bing_uet');
+  const analyticsObserved = Boolean(googleAnalytics?.requestObserved);
+  const analyticsPartial = Boolean(
+    googleAnalytics?.ids.length || googleAnalytics?.initialized || googleAnalytics?.scriptCount
+      || tagManager?.ids.length || tagManager?.initialized || tagManager?.scriptCount,
+  );
+  const adEvidence = Boolean(
+    settings.useGoogleAds || settings.useMicrosoftAds
+      || googleAds?.ids.length || googleAds?.initialized || googleAds?.requestObserved
+      || bingUet?.ids.length || bingUet?.initialized || bingUet?.requestObserved,
+  );
+  const adRequestObserved = Boolean(googleAds?.requestObserved || bingUet?.requestObserved);
+  const languageTargetHealthy = Boolean(
+    international.targets?.some((target) => target.kind === 'language' && !target.issue && !target.issues?.length && target.status && target.status < 400),
+  );
+  const configuredLanguageMatches = Boolean(
+    settings.targetLanguage && international.htmlLang
+      && baseLanguage(settings.targetLanguage) === baseLanguage(international.htmlLang),
+  );
+  const nonChineseLanguage = Boolean(international.htmlLang && baseLanguage(international.htmlLang) !== 'zh');
+  const localizationIssueIds = issues.filter((item) => item.area === 'localization').map((item) => item.id);
+  const measurementIssueIds = issues.filter((item) => item.area === 'measurement').map((item) => item.id);
+  const advertisingIssueIds = issues.filter((item) => item.area === 'advertising').map((item) => item.id);
+  const businessIssueIds = opportunities.filter((item) => item.area === 'business_localization').map((item) => item.id);
+  const searchIssueIds = issues.filter((item) => item.area === 'search_access').map((item) => item.id);
+  const regionalSignals = international.regionalSignals;
+  const overseasCurrencies = regionalSignals?.currencyCodes.filter((code) => !['CNY', 'RMB'].includes(code)) ?? [];
+  const overseasPhoneCodes = regionalSignals?.phoneCountryCodes.filter((code) => code !== '+86') ?? [];
+  const regionalEvidenceParts = [...overseasCurrencies, ...overseasPhoneCodes];
+  const regionalEvidence = regionalEvidenceParts.length > 0;
+  const googleEvidence = [
+    ...(googleAnalytics?.ids.filter((id) => id.startsWith('G-')).map((id) => `GA4 ${id}`) ?? []),
+    ...(tagManager?.ids.map((id) => `GTM ${id}`) ?? []),
+    ...(analyticsObserved ? ['已观察到 GA4 数据请求'] : []),
+  ];
+  const otherAnalyticsLabels = otherAnalytics(staticSnapshot).map((item) => item.label);
+  const capabilities: OverseasMarketCapability[] = [
+    {
+      id: 'search_access', label: '搜索访问',
+      state: searchIssueIds.length ? 'attention' : access.status === 'normal' ? 'ready' : access.status === 'confirm' ? 'unknown' : 'attention',
+      conclusion: searchIssueIds.length ? '发现入口或公开访问风险。' : access.status === 'normal' ? '当前页面可以被公开读取。' : '公开访问结果还不能完整确认。',
+      evidence: '检查了 HTTPS、公开响应、robots、索引指令和主要页面内容。',
+      limitation: '公开读取正常不代表已经收录、排名或在海外节点始终稳定。', relatedFindingIds: searchIssueIds,
+    },
+    {
+      id: 'localization', label: '本地化内容',
+      state: localizationIssueIds.length ? 'attention' : languageTargetHealthy || configuredLanguageMatches ? 'ready' : nonChineseLanguage ? 'partial' : 'not_observed',
+      conclusion: localizationIssueIds.length ? '关联语言或移动版本存在语言声明问题。' : languageTargetHealthy ? '已发现可访问的语言版本关系。' : configuredLanguageMatches ? '当前页面语言与已填写目标语言一致，但还没有其他语言版本证据。' : nonChineseLanguage ? `当前页面声明为 ${international.htmlLang}，尚未确认目标地区或其他语言版本。` : `当前是 ${international.htmlLang || '未声明语言'} 单语言页面，未发现其他语言版本。`,
+      evidence: `页面语言 ${international.htmlLang || '未声明'}；hreflang ${international.hreflangCount} 条；已检查关联版本 ${international.relatedCheck?.checkedUrls.length ?? 0} 个。`,
+      limitation: '没有 hreflang 对单语言站不是错误；进入新语言市场前必须先有真实本地化页面。', relatedFindingIds: localizationIssueIds,
+    },
+    {
+      id: 'measurement', label: '海外数据统计',
+      state: analyticsObserved ? 'ready' : analyticsPartial ? 'partial' : 'not_observed',
+      conclusion: analyticsObserved ? '已观察到 GA4 数据请求。' : analyticsPartial ? '发现 Google 标签或 GTM 容器，但还没有观察到 GA4 数据请求。' : '未发现 GA4 或 GTM 的标签、初始化或请求。',
+      evidence: [...googleEvidence, ...otherAnalyticsLabels].join('、') || '未发现 Google/Bing 分析链路或其他统计工具。',
+      limitation: '标签或请求不能证明平台后台接收，更不能证明有效线索、订单或收入。', relatedFindingIds: measurementIssueIds,
+    },
+    {
+      id: 'advertising', label: '广告追踪',
+      state: !adEvidence ? 'not_applicable' : adRequestObserved ? 'ready' : 'partial',
+      conclusion: !adEvidence ? '未发现 Google Ads 或 Microsoft Ads 投放证据，当前不适用。' : adRequestObserved ? '已观察到广告平台浏览器请求，后台接收仍需核对。' : '发现广告标签或投放设置，但还没有完整请求证据。',
+      evidence: adEvidence ? '检查了 Google Ads、Bing UET 和点击参数。' : '当前页面没有 Google Ads、Bing UET 或用户投放设置证据。',
+      limitation: '没有投放证据时不判错；浏览器请求也不能代表广告后台已经采用转化。', relatedFindingIds: advertisingIssueIds,
+    },
+    {
+      id: 'business_localization', label: '海外转化支持',
+      state: regionalEvidence ? 'partial' : 'unknown',
+      conclusion: regionalEvidence ? '页面出现部分地区、货币或联系方式信号，还需核对完整业务支持。' : '浏览器无法确认当地付款、配送、税务、客服和服务范围是否准备好。',
+      evidence: regionalEvidence ? `发现可能面向境外用户的地区信号：${regionalEvidenceParts.join('、')}` : '当前页面没有足够的目标市场业务信息。',
+      limitation: '首页没有展示这些信息不等于业务一定没有；需要目标市场和业务资料确认。', relatedFindingIds: businessIssueIds,
+    },
+  ];
+  const explicitMarketTarget = Boolean(settings.targetCountry || settings.targetLanguage);
+  const hasLanguageVersion = Boolean(international.hreflangCount || international.targets?.some((target) => target.kind === 'language'));
+  const noOverseasEvidence = baseLanguage(international.htmlLang) === 'zh'
+    && !explicitMarketTarget
+    && !hasLanguageVersion
+    && !analyticsPartial
+    && !adEvidence
+    && !regionalEvidence;
+  const localizationEstablished = languageTargetHealthy || configuredLanguageMatches;
+  const marketEvidence: OverseasMarketAssessment['marketEvidence'] = !international.htmlLang || access.status === 'confirm'
+    ? 'unknown'
+    : noOverseasEvidence
+      ? 'not_observed'
+      : access.status === 'normal' && localizationEstablished && analyticsObserved
+        ? 'established'
+        : 'partial';
+  const headline = marketEvidence === 'not_observed'
+    ? '尚未发现明确的海外市场建设证据'
+    : marketEvidence === 'established'
+      ? '已发现较完整的海外市场基础'
+      : marketEvidence === 'partial'
+        ? '已发现部分海外市场基础，仍有能力缺口'
+        : '海外市场建设证据不足，暂时无法判断';
+  const summary = marketEvidence === 'not_observed'
+    ? `当前页面是 ${international.htmlLang || '单语言'} 页面${otherAnalyticsLabels.length ? `，只发现 ${otherAnalyticsLabels.join('、')}` : ''}，没有发现其他语言版本或 Google/Bing 流量衡量链路。这不是国内网站的技术错误，但如果准备进入海外市场，仍需补齐本地化内容、数据统计和海外转化信息。`
+    : marketEvidence === 'established'
+      ? '页面、语言或地区关系以及浏览器侧分析链路已经取得直接证据；平台接收和真实业务仍需外部数据核对。'
+      : '当前页面已经出现部分海外能力信号，但仍有未建立、未验证或需要业务确认的部分。';
+  return { marketEvidence, headline, summary, capabilities };
 }
 
 export function buildOverseasDiagnosis(input: OverseasDiagnosisInput): OverseasDiagnosis {
@@ -448,9 +591,35 @@ export function buildOverseasDiagnosis(input: OverseasDiagnosisInput): OverseasD
   if (robotsAllowed) normalItems.push({ id: 'overseas:normal:robots', title: 'Google 和 Bing 未被抓取规则禁止', evidence: 'robots.txt 的 Googlebot、Bingbot 和通用规则未显示当前页面被禁止。' });
   if (canRead) normalItems.push({ id: 'overseas:normal:readable-content', title: '标题和主要内容可以读取', evidence: '当前浏览器页面包含可读取的标题与主要正文。' });
 
-  const staticFindings = effectiveStaticSnapshot ? diagnoseOverseasStatic(effectiveStaticSnapshot, settings) : [];
+  const staticFindings = effectiveStaticSnapshot ? diagnoseOverseasStatic(effectiveStaticSnapshot, settings, snapshot) : [];
   const issues = staticFindings.filter((item) => item.kind === 'issue');
   const opportunities = staticFindings.filter((item) => item.kind === 'opportunity');
+  // Keep the current page language conclusion tied to the latest optional settings,
+  // even when an older stored static snapshot did not contain that issue yet.
+  for (const message of international.issues) {
+    if (issues.some((item) => item.title === message)) continue;
+    if (!/语言|hreflang|Canonical|国际|地区|本地化/.test(message)) continue;
+    issues.push(finding({
+      id: stableFindingId('international', `current:${message}`),
+      category: 'international',
+      area: 'localization',
+      title: message,
+      priority: /无效|不一致|缺少/.test(message) ? 'P1' : 'P2',
+      status: 'attention',
+      confidence: international.languageConfidence === 'low' ? 'low' : 'medium',
+      evidence: `检查地址：${snapshot.url}；页面语言：${international.htmlLang || '未声明'}；目标语言：${settings.targetLanguage || '未设置'}；Canonical：${snapshot.canonicals[0] || '未发现'}`,
+      why: '搜索引擎需要知道当前页面服务的语言和地区；声明冲突会让用户和搜索系统难以选择正确版本。',
+      action: '确认页面真实语言和目标市场，再修正 html lang、Canonical 与 hreflang；没有真实语言页时不要先添加空标签。',
+      verification: '重新扫描后页面声明语言、正文语言、Canonical 和真实语言页关系一致。',
+      platformConfirmation: '使用 Search Console 的国际页面 URL 检查和 Bing Webmaster Tools 进一步确认。',
+      rollback: '保留原语言模板和元数据配置，发现错误时恢复原版本。',
+      limitation: '正文语言只是页面样本判断；插件不模拟海外 IP，也不能直接证明当地排名。',
+      applicability: '适用于页面已明确声明目标语言，或页面代码直接显示语言关系冲突的情况。',
+      directResult: '页面语言和语言版本关系与真实业务内容保持一致。',
+      possibleEffect: '降低搜索系统向用户展示错误语言版本的风险。',
+      notGuaranteed: '语言配置正确不能保证收录、排名或海外流量增长。',
+    }));
+  }
   for (const reconciliationFinding of input.reconciliation?.findings ?? []) {
     (reconciliationFinding.kind === 'opportunity' ? opportunities : issues).push(reconciliationFinding);
   }
@@ -478,13 +647,28 @@ export function buildOverseasDiagnosis(input: OverseasDiagnosisInput): OverseasD
     evidence: '用户已经记录 Search Console 实时测试存在问题。', why: 'Google 当前读取页面时可能遇到状态码、robots、重定向、Canonical 或渲染问题。', action: '按 Search Console 的具体错误类型修正，而不是仅根据插件分数修改。', verification: '再次测试后 Google 显示可以访问。', platformConfirmation: 'Search Console 实时 URL 测试。', rollback: '一次只修改一个直接根因并保留原配置。', limitation: '实时可访问仍不等于已经收录或有排名。',
   }));
   if (tracking.status === 'attention') issues.push(finding({
-    id: 'overseas:tracking:test-failed', category: 'tracking', title: '客户操作记录存在漏发、重复或误计', priority: 'P1', status: 'attention', confidence: 'high',
+    id: 'overseas:tracking:test-failed', category: 'tracking', area: 'measurement', title: '客户操作记录存在漏发、重复或误计', priority: 'P1', status: 'attention', confidence: 'high',
     evidence: tracking.messages.join(' '), why: '漏记、重复或把失败操作记成转化会让分析与广告平台数据失真。', action: '根据时间线检查事件触发条件、接口成功回调和重复安装来源。', verification: '一次成功业务只记录一次主要事件，失败操作不记录为转化。', platformConfirmation: 'GA4 DebugView、GTM Preview 和广告平台转化诊断。', rollback: '保留原 GTM 容器或代码版本，逐项回退触发条件。', limitation: '现场观察不能证明平台最终采用了数据。',
   }));
   const entryFailures = snapshot.technical?.transport.variants.filter((item) => item.error || item.status === null || item.status >= 400) ?? [];
   if (entryFailures.length) issues.push(finding({
     id: 'overseas:search:host-entry-risk', category: 'search_access', title: '网站入口存在 HTTPS 或响应失败风险', priority: 'P1', status: 'attention', confidence: 'medium',
     evidence: entryFailures.map((item) => `${item.requestedUrl}：${item.status ?? '无状态'}${item.error ? `，${item.error}` : ''}`).join('；'), why: '同一网站的协议或主机入口若不能稳定收敛，用户和搜索引擎可能访问到不同结果。', action: '让服务器或 CDN 将 HTTP/HTTPS、www/非 www 统一到一个可用的正式地址，并修复失败入口的证书或路由。', verification: '完整入口检查中的每个已授权入口都能安全访问并收敛到同一正式地址。', platformConfirmation: '证书监控、CDN 日志和 Search Console 属性设置。', rollback: '保留入口、证书和 CDN 规则快照，按单条规则回滚。', limitation: '入口检查只代表本次网络和已授权地址，不能证明全球所有节点稳定。',
+  }));
+
+  opportunities.push(finding({
+    id: 'overseas:business:market-conversion-support', kind: 'opportunity', category: 'international', area: 'business_localization', title: '为目标市场补齐购买、咨询和服务信息', priority: 'P3', status: 'confirm', confidence: 'low',
+    evidence: '当前页面证据不足以确认目标市场的货币、付款、配送、税务、客服和服务范围。',
+    why: '海外搜索流量即使能够访问页面，也需要明确知道是否服务当地用户、如何付款、何时交付以及遇到问题联系谁。',
+    action: '确定目标国家或地区后，在对应语言页面说明服务范围、价格货币、付款方式、交付或响应时间、税费与退款政策，并提供当地用户可用的联系入口。',
+    verification: '目标市场用户可以在不依赖人工猜测的情况下确认服务范围、价格口径、付款和售后方式；相关页面在目标语言版本中保持一致。',
+    platformConfirmation: '使用目标市场真实咨询或订单记录核对页面承诺与有效业务结果。',
+    rollback: '先以独立页面或内容模块发布；业务规则未确认前不要向所有地区展示价格或交付承诺。',
+    limitation: '首页未展示这些信息不等于业务一定没有；插件不能从浏览器确认真实库存、支付、税务或履约能力。',
+    applicability: '仅在计划服务海外用户或投放海外流量时适用；当前未确认目标市场。',
+    directResult: '目标用户能在页面上确认是否适用、多少钱、如何购买或咨询以及服务边界。',
+    possibleEffect: '减少海外访问者因信息不完整产生的退出和无效咨询。',
+    notGuaranteed: '补齐地区信息不能保证当地收录、排名、点击或成交。',
   }));
 
   const evidenceGaps: OverseasDiagnosis['evidenceGaps'] = [
@@ -514,6 +698,19 @@ export function buildOverseasDiagnosis(input: OverseasDiagnosisInput): OverseasD
     limitation: '插件不会在自动扫描时弹出跨域权限；未检查的地址只作为检测边界，不生成问题。',
   });
   const unique = <T extends { id: string }>(items: T[]) => [...new Map(items.map((item) => [item.id, item])).values()];
+  const normalItemList = unique(normalItems);
+  const issueItems = unique(issues);
+  const opportunityItems = unique(opportunities);
+  const evidenceGapItems = unique(evidenceGaps);
+  const marketAssessment = buildMarketAssessment({
+    snapshot,
+    staticSnapshot: effectiveStaticSnapshot,
+    settings,
+    access,
+    international,
+    issues: issueItems,
+    opportunities: opportunityItems,
+  });
   const result = {
     checkedItems: [
     '浏览器页面与公开访问结果',
@@ -522,10 +719,11 @@ export function buildOverseasDiagnosis(input: OverseasDiagnosisInput): OverseasD
     'Google Analytics 与广告标签',
     '页面标题和主要内容',
     ],
-    normalItems: unique(normalItems),
-    issues: unique(issues),
-    opportunities: unique(opportunities),
-    evidenceGaps: unique(evidenceGaps),
+    normalItems: normalItemList,
+    issues: issueItems,
+    opportunities: opportunityItems,
+    evidenceGaps: evidenceGapItems,
+    marketAssessment,
     otherAnalytics: otherAnalytics(effectiveStaticSnapshot),
   };
   return { ...result, normalCount: result.normalItems.length, issueCount: result.issues.length, opportunityCount: result.opportunities.length };
@@ -737,12 +935,13 @@ export function finalizeTrackingRun(run: TrackingTestRun): TrackingTestRun {
 export function diagnoseOverseasStatic(
   snapshot: OverseasStaticSnapshot,
   settings: InternationalProjectSettings,
+  page?: PageSnapshot,
 ): OverseasDiagnosticFinding[] {
   const findings: OverseasDiagnosticFinding[] = [];
   const googleTags = snapshot.tags.filter((item) => item.platform.startsWith('google_'));
   const bingTags = snapshot.tags.filter((item) => item.platform === 'bing_uet' || item.platform === 'microsoft_clarity');
   if (settings.useGoogleAds && !googleTags.some((item) => item.requestObserved)) findings.push(finding({
-    id: 'overseas:tracking:google-ads-request-missing', category: 'tracking', title: '正在投放 Google Ads，但没有观察到 Google 收集请求', priority: 'P1', status: 'attention', confidence: 'high',
+    id: 'overseas:tracking:google-ads-request-missing', category: 'tracking', area: 'advertising', title: '正在投放 Google Ads，但没有观察到 Google 收集请求', priority: 'P1', status: 'attention', confidence: 'high',
     evidence: googleTags.some((item) => item.ids.length || item.initialized) ? '页面存在 Google 标签或初始化证据，但本次访问没有观察到收集请求。' : '页面没有识别到 GA4、GTM 或 Google Ads 标签，也没有观察到收集请求。',
     why: '广告点击和页面转化可能无法进入分析或广告学习链路，平台 CPA/ROAS 会失去可信基础。',
     action: '先确认标签覆盖所有落地页，再检查 Consent 默认状态、GTM 触发条件和请求是否被 CSP 或广告拦截器阻止。',
@@ -754,7 +953,7 @@ export function diagnoseOverseasStatic(
     applicability: '仅在已经确认当前网站正在投放 Google Ads 时适用。', directResult: '主要落地页能够在正确同意状态下发送一次预期分析或广告请求。', possibleEffect: '广告转化诊断和自动出价可获得更完整的浏览器侧信号。', notGuaranteed: '观察到请求不能保证 Google Ads 后台已接收、归因或用于出价。',
   }));
   if (settings.useMicrosoftAds && !bingTags.some((item) => item.platform === 'bing_uet' && item.requestObserved)) findings.push(finding({
-    id: 'overseas:tracking:microsoft-ads-uet-missing', category: 'tracking', title: '正在投放 Microsoft Ads，但没有观察到 UET 请求', priority: 'P1', status: 'attention', confidence: 'high',
+    id: 'overseas:tracking:microsoft-ads-uet-missing', category: 'tracking', area: 'advertising', title: '正在投放 Microsoft Ads，但没有观察到 UET 请求', priority: 'P1', status: 'attention', confidence: 'high',
     evidence: bingTags.some((item) => item.ids.length || item.initialized) ? '页面存在 UET/Clarity 脚本候选，但本次访问没有观察到 UET 收集请求。' : '页面没有识别到 UET 标签或 bat.bing.com 请求。',
     why: 'Microsoft Ads 无法可靠学习主要转化，搜索词、出价与再营销判断都会受到影响。',
     action: '确认基础 UET 覆盖落地页和转化页，并检查 Tag ID、CMP 同意条件以及 SPA 页面浏览触发。Clarity 不能替代 UET 转化。',
@@ -788,22 +987,49 @@ export function diagnoseOverseasStatic(
   }));
   const lost = snapshot.clickParameters.filter((item) => item.present && item.preservedAfterRedirect === false);
   if (lost.length) findings.push(finding({
-    id: 'overseas:tracking:click-parameter-loss', category: 'tracking', title: '跳转后丢失广告点击或 UTM 参数', priority: 'P1', status: 'attention', confidence: 'high', evidence: `丢失参数：${lost.map((item) => item.name).join('、')}。`, why: '点击来源无法进入后续会话或业务链路，会降低广告归因与离线转化匹配率。', action: '检查 HTTP/HTTPS、主机、语言跳转和登录/结账跨域是否保留允许的查询参数，并避免把敏感数据塞进 URL。',
+    id: 'overseas:tracking:click-parameter-loss', category: 'tracking', area: 'advertising', title: '跳转后丢失广告点击或 UTM 参数', priority: 'P1', status: 'attention', confidence: 'high', evidence: `丢失参数：${lost.map((item) => item.name).join('、')}。`, why: '点击来源无法进入后续会话或业务链路，会降低广告归因与离线转化匹配率。', action: '检查 HTTP/HTTPS、主机、语言跳转和登录/结账跨域是否保留允许的查询参数，并避免把敏感数据塞进 URL。',
     codeExample: "const next = new URL('/en/landing', location.origin);\nfor (const key of ['gclid','gbraid','wbraid','msclkid','utm_source','utm_medium','utm_campaign']) { const value = new URL(location.href).searchParams.get(key); if (value) next.searchParams.set(key, value); }",
     verification: '使用虚拟测试参数访问入口，检查每次跳转和最终页面仍保留参数，再核对后端只保存业务允许的归因字段。', platformConfirmation: '广告自动标记、GA4 会话来源和离线转化上传匹配率。', rollback: '上线前记录原跳转规则；异常时恢复，并避免开放任意参数透传。', limitation: '本检查只比较当前请求与最终地址，跨页面后端保存仍需业务系统证明。',
   }));
   const internationalIssues = [
-    ...snapshot.internationalSeo.issues,
-    ...(snapshot.internationalSeo.targets ?? []).flatMap((target) => target.issue
-      ? [`${target.kind === 'mobile' ? '移动版本' : `${target.lang} 语言页`}：${target.issue}`]
-      : []),
+    ...snapshot.internationalSeo.issues.map((message) => ({
+      code: internationalIssueCode(message),
+      targetUrl: page?.url || '',
+      status: page?.siteProbe.page.status ?? null,
+      finalUrl: page?.siteProbe.page.finalUrl || page?.url || '',
+      htmlLang: snapshot.internationalSeo.htmlLang,
+      canonical: page?.canonicals[0] || '',
+      noindex: page?.robotsMeta.some((item) => /noindex/i.test(item)) ?? false,
+      message,
+      label: '',
+      targetType: 'current',
+    })),
+    ...(snapshot.internationalSeo.targets ?? []).flatMap((target) => {
+      const targetIssues = target.issues?.length
+        ? target.issues
+        : target.issue
+          ? [{ code: internationalIssueCode(target.issue), targetUrl: target.url, status: target.status, finalUrl: target.finalUrl, htmlLang: target.htmlLang, canonical: target.canonical, noindex: target.noindex, message: target.issue }]
+          : [];
+      return targetIssues.map((issue) => ({ ...issue, label: target.kind === 'mobile' ? '移动版本' : `${target.lang} 语言页`, targetType: target.kind }));
+    }),
   ];
-  for (const issue of internationalIssues) findings.push(finding({
-    id: stableFindingId('international', issue), category: 'international', title: issue, priority: /noindex|404|Canonical/.test(issue) ? 'P1' : 'P2', status: 'attention', confidence: snapshot.internationalSeo.languageConfidence === 'low' ? 'low' : 'medium', evidence: `页面语言 ${snapshot.internationalSeo.htmlLang || '未声明'}，目标语言 ${snapshot.internationalSeo.targetLanguage || '未设置'}，hreflang ${snapshot.internationalSeo.hreflangCount} 条。`,
-    why: '搜索引擎需要明确每个语言/地区页面服务谁，以及这些页面之间是什么关系；冲突会让错误版本参与排序或被选作规范页。', action: '先确认页面实际服务语言和地区，再修正 html lang、Canonical 和 hreflang；每个可索引语言页应自引用，并与对应页互返。',
-    codeExample: '<link rel="alternate" hreflang="{{CURRENT_LANGUAGE}}" href="{{PAGE_URL}}" />\n<link rel="alternate" hreflang="{{ALTERNATE_LANGUAGE}}" href="{{ALTERNATE_PAGE_URL}}" />',
-    verification: '关联语言页应返回 200、可索引，Canonical 指向自身或正确规范页，并互相声明相同语言集合。', platformConfirmation: 'Google Search Console URL 检查与 Bing Webmaster Tools 抓取/索引报告。', rollback: '发布前保存旧模板；批量异常时恢复模板并重新生成 Sitemap。', limitation: '正文语言识别是候选；低置信度时必须人工确认，插件不模拟海外 IP 或当地排名。',
-  }));
+  for (const issue of internationalIssues) {
+    const priority = /noindex|404|返回|Canonical|缺少 html lang/.test(issue.message) ? 'P1' : 'P2';
+    const evidence = [
+      `检查地址：${issue.targetUrl}`,
+      `响应状态：${issue.status ?? '无法取得'}`,
+      `最终地址：${issue.finalUrl || '无法取得'}`,
+      `页面语言：${issue.htmlLang || '未声明'}`,
+      `Canonical：${issue.canonical || '未发现'}`,
+      `noindex：${issue.noindex ? '是' : '否'}`,
+    ].join('；');
+    findings.push(finding({
+      id: `overseas:international:${issue.code}:${issue.targetType || 'page'}:${encodeURIComponent(normalizeTrackingPage(issue.targetUrl || page?.url || 'current'))}`, category: 'international', area: 'localization', title: issue.label ? `${issue.label}：${issue.message}` : issue.message, priority, status: 'attention', confidence: snapshot.internationalSeo.languageConfidence === 'low' ? 'low' : 'medium', evidence,
+      why: '搜索引擎需要明确每个语言/地区页面服务谁，以及这些页面之间是什么关系；冲突会让错误版本参与排序或被选作规范页。', action: '先确认页面实际服务语言和地区，再修正 html lang、Canonical 和 hreflang；每个可索引语言页应自引用，并与对应页互返。',
+      codeExample: '<link rel="alternate" hreflang="{{CURRENT_LANGUAGE}}" href="{{PAGE_URL}}" />\n<link rel="alternate" hreflang="{{ALTERNATE_LANGUAGE}}" href="{{ALTERNATE_PAGE_URL}}" />',
+      verification: '关联语言页应返回 200、可索引，Canonical 指向自身或正确规范页，并互相声明相同语言集合。', platformConfirmation: 'Google Search Console URL 检查与 Bing Webmaster Tools 抓取/索引报告。', rollback: '发布前保存旧模板；批量异常时恢复模板并重新生成 Sitemap。', limitation: '正文语言识别是候选；低置信度时必须人工确认，插件不模拟海外 IP 或当地排名。',
+    }));
+  }
   const ga = snapshot.tags.find((item) => item.platform === 'google_analytics');
   const gtm = snapshot.tags.find((item) => item.platform === 'google_tag_manager');
   const hasGa4OrGtm = Boolean(

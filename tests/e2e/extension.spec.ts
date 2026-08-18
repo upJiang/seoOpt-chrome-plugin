@@ -659,6 +659,11 @@ test('runs the complete overseas optimization workflow', async () => {
   await expect(overseasTabs.getByRole('tab', { name: '概况' })).toHaveAttribute('aria-selected', 'true');
 
   await expect(panelPage.getByText('自动检查完成')).toBeVisible();
+  await expect(panelPage.getByLabel('海外市场建设判断')).toBeVisible();
+  await expect(panelPage.locator('.market-capability')).toHaveCount(5);
+  await expect(panelPage.locator('.market-capability-heading > span:first-child').allTextContents()).resolves.toEqual([
+    '搜索访问', '本地化内容', '海外数据统计', '广告追踪', '海外转化支持',
+  ]);
   await expect(panelPage.locator('.overseas-result-group')).toHaveCount(4);
   await expect(panelPage.getByRole('heading', { name: '搜索访问' })).toBeVisible();
   await expect(panelPage.getByRole('heading', { name: '语言与地区' })).toBeVisible();
@@ -887,9 +892,10 @@ test('generates Chrome Web Store screenshots from the real extension UI', async 
   await expect(runSiteAudit).toBeVisible();
   await runSiteAudit.click();
   await expect(panelPage.locator('.site-run-summary')).toContainText('已完成', { timeout: 20_000 });
-  const siteIssue = panelPage.locator('.site-issue-card').first();
-  await expect(siteIssue).toBeVisible();
-  await siteIssue.scrollIntoViewIfNeeded();
+  await expect(panelPage.locator('.site-issue-card').first()).toBeVisible();
+  await panelPage.locator('#view-panel').evaluate((panel) => {
+    panel.querySelector('.site-issue-card')?.scrollIntoView({ block: 'center' });
+  });
   await capture('03-site-audit-1280x800.png');
 
   await fixturePage.goto('http://127.0.0.1:4173/overseas-demo.html');
@@ -897,15 +903,16 @@ test('generates Chrome Web Store screenshots from the real extension UI', async 
   await triggerExtensionAction(fixturePage);
   await clickWithoutFocusing(panelPage, '海外站优化');
   await expect(panelPage.getByRole('heading', { name: '海外站优化' })).toBeVisible();
-  await panelPage.locator('details.optional-settings summary').click();
+  const optionalSettings = panelPage.locator('details.optional-settings');
+  await optionalSettings.locator('summary').click();
   await panelPage.getByLabel('目标国家或地区').fill('美国');
   await panelPage.getByLabel('目标语言').fill('en-US');
-  const overseasTabs = panelPage.getByRole('tablist', { name: '海外站优化工作区' });
-  await overseasTabs.getByRole('tab', { name: '优化建议' }).click();
-  const overseasFinding = panelPage.locator('.overseas-recommendations-panel .recommendation-item').first();
-  await expect(overseasFinding).toBeVisible({ timeout: 20_000 });
-  await overseasFinding.scrollIntoViewIfNeeded();
-  await capture('04-overseas-advice-1280x800.png');
+  await optionalSettings.locator('summary').click();
+  const marketAssessment = panelPage.getByLabel('海外市场建设判断');
+  await expect(marketAssessment).toBeVisible({ timeout: 20_000 });
+  await expect(marketAssessment.locator('.market-capability')).toHaveCount(5);
+  await marketAssessment.evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  await capture('04-overseas-market-1280x800.png');
 
   await clickWithoutFocusing(panelPage, 'SEM');
   await expect(panelPage.getByRole('heading', { name: 'SEM 诊断' })).toBeVisible();

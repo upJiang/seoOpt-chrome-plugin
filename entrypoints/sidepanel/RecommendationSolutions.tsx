@@ -43,7 +43,7 @@ export function ImplementationRecipeView({ recipe, compact = false }: { recipe: 
 }
 
 function recommendationStatus(item: OptimizationRecommendation): string {
-  if (item.findings[0]?.status === 'warning') return item.confidence === 'high' ? '高置信度优化机会' : '条件性优化机会';
+  if (item.findings[0]?.status === 'warning') return item.confidence === 'high' ? '高置信度优化建议' : '条件性优化建议';
   if (item.priority === 'P0') return '已确认的阻断问题';
   if (item.priority === 'P1' && item.confidence === 'high') return '已确认的高影响问题';
   if (item.confidence === 'high') return '高置信度增长问题';

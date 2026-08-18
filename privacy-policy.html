@@ -69,7 +69,7 @@
   <p>本扩展不要求用户创建开发者账户，也不收集姓名、邮箱、电话号码或政府签发的身份信息。</p>
 
   <h3>1.5 海外站与主动追踪测试</h3>
-  <p>用户使用“海外站优化”时，本扩展可能在本地处理目标国家或地区、目标语言、主要搜索引擎、核心转化、是否投放 Google Ads 或 Microsoft Ads，以及用户填写的跨域转化域名。本扩展识别页面中的 GA4、GTM、Google Ads、Bing UET、Clarity、百度统计、Consent Mode、点击参数、hreflang 和移动版 alternate 等公开技术信号。检查结果在本地归类为已确认正常、已确认问题、条件性优化机会和检测边界；这些分类不会向开发者传输。</p>
+  <p>用户使用“海外站优化”时，本扩展可能在本地处理目标国家或地区、目标语言、主要搜索引擎、核心转化、是否投放 Google Ads 或 Microsoft Ads，以及用户填写的跨域转化域名。本扩展识别页面中的 GA4、GTM、Google Ads、Bing UET、Clarity、百度统计、Consent Mode、点击参数、hreflang 和移动版 alternate 等公开技术信号，并在本地生成海外市场建设判断及搜索访问、本地化内容、海外数据统计、广告追踪和海外转化支持五项能力结论。检查结果归类为已确认正常、已确认问题、条件性优化建议和检测边界；这些分类不会向开发者传输。GTM 容器加载只作为容器证据，不会被当作 GA4 数据请求或平台后台接收证据。</p>
   <p>百度统计或 Clarity 的存在只用于说明对应统计工具被发现，不能证明 GA4、Google Ads、Microsoft Ads、平台后台接收或真实业务链路正常。缺少 GA4/GTM、广告标签或多语言页面不会脱离用户的业务前提自动判为网站问题。</p>
   <p>Google Search Console、Google Ads、Microsoft Advertising 等平台后台结果不在自动扫描范围内。本扩展不连接 Google/Bing OAuth，不读取或保存相关账户、登录信息、站点列表或后台报告。旧版本中用户手工保存的 Search Console 确认结果仍可在本地兼容读取，0.8.0 不再把该确认流程作为概况任务向导。</p>
   <p>普通扫描不会持续监听。只有用户点击“开始测试”后，本扩展才临时观察 <code>dataLayer.push</code>、<code>gtag</code>、<code>uetq.push</code>、<code>sendBeacon</code>、<code>fetch</code>、XHR 和 SPA 路由调用。只保留事件名、平台、相对时间、可安全识别的目标 ID，以及关键字段是否存在。测试最长 10 分钟、内存最多 200 条，停止、超时、页面卸载或权限失效后恢复被包装的方法。</p>
