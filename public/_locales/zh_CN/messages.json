@@ -1,6 +1,6 @@
 {
   "extName": { "message": "SEO优化" },
-  "extDescription": { "message": "本地检查页面、站点与海外追踪链路，并结合 SEO/SEM 数据提供可解释的优化建议。" },
+  "extDescription": { "message": "在 Chrome 侧边栏检查当前网页，理解问题原因，获得可执行的修改建议。" },
   "actionTitle": { "message": "扫描当前页面" },
   "tabOverview": { "message": "概览" },
   "tabIssues": { "message": "问题" },

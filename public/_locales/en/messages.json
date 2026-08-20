@@ -1,6 +1,6 @@
 {
   "extName": { "message": "SEO Optimizer" },
-  "extDescription": { "message": "Audit page, site and overseas tracking signals locally, then diagnose SEO/SEM data with explainable actions." },
+  "extDescription": { "message": "Inspect the current webpage in the Chrome side panel and get clear, actionable recommendations." },
   "actionTitle": { "message": "Scan current page" },
   "tabOverview": { "message": "Overview" },
   "tabIssues": { "message": "Issues" },

@@ -6,14 +6,15 @@
 - 最低 Chrome 版本：`116`
 - ZIP：`.output/seo-opt-chrome-plugin-0.8.0-chrome.zip`
 - ZIP 大小：约 `1.0 MB`
-- SHA-256：`79e7f60f62c1269f0f6006073093bdbfc7f534166ad0d40525708e4d83bc67ae`
+- SHA-256：`176b16e6563a5e7cf35d21f773600c8dfb08735b735c98cf44d7564de601d2b5`
 - 清单版本：Manifest V3
 
 ## 商店文案
 
-- 扩展名称：`SEO优化 - 网站审计与优化建议`
+- 扩展名称：`SEO优化`
 - 简短说明：见 `store/zh-CN-listing.md`
 - 详细说明：见 `store/zh-CN-listing.md`
+- 重新提交说明：见 `store/resubmission-explanation-0.8.0.md`
 - 版本说明：见 `store/release-notes-0.8.0.md`
 - 权限理由：见 `store/permission-justifications-0.8.0.md`
 - 隐私权披露：见 `store/privacy-disclosure-0.8.0.md`
